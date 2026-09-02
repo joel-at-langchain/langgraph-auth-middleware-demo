@@ -1,0 +1,5 @@
+langgraph>=0.4
+langchain-anthropic>=0.3
+langchain-core>=0.3
+langsmith>=0.3
+python-dotenv>=1.0
