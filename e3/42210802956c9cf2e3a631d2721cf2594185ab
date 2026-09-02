@@ -1,0 +1,25 @@
+.gitignore
+  s_fcb40564742564::t_9ce8eb903eb9fb 1-5
+.github/instructions/corridor.instructions.md
+  s_fcb40564742564::t_eb35ce7cdccceb 1-7
+langgraph_auth_middleware.py
+  s_fcb40564742564::t_a6002327713ce8 1-313
+requirements.txt
+  s_fcb40564742564::t_f4be2040758578 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e342210802956c9cf2e3a631d2721cf2594185ab",
+  "prompts": {},
+  "sessions": {
+    "s_fcb40564742564": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f73b8112-63a2-44c0-862e-c337ce9d9cc6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    }
+  }
+}
