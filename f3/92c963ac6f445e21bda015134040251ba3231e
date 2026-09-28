@@ -1,0 +1,199 @@
+langgraph_auth_middleware.py
+  s_fcb40564742564::t_8af42374a5f8b5 286,291,293-294
+  s_fcb40564742564::t_ac610cd5c04a99 292
+  s_fcb40564742564::t_6b83c39b75e577 287-290
+  s_fcb40564742564::t_95bba27d89c036 22
+online_evaluator_code.py
+  s_9e68404d8a5b24::t_229bcabc8a3562 92,97,99
+  s_9e68404d8a5b24::t_ab2820210c0f5a 106,118,120,136,142,144-150,158,165,167,184,190-191,198,244,246-250,253,255-256,259-261,264
+  s_9e68404d8a5b24::t_2092b3f794adf2 23-25,41,46-49,53-56,62-68,73-75
+  s_9e68404d8a5b24::t_34a0b426c8f870 1-22,26-40,42-45,50-52,57-61,69-72,76-91,93-96,98,100-105,107-117,119,121-135,137-141,143,151-157,159-164,166,168-183,185-189,192-197,199-243,245,251-252,254,257-258,262-263,265-270
+langgraph_fga_governance.py
+  s_0e56fa40cb323c::t_1235bcb4425544 397-398,403,434
+  s_d21b3d7f6db563::t_166fab85c4672c 479
+  s_d21b3d7f6db563::t_ceab918ac383f3 242
+  s_d21b3d7f6db563::t_c8b36097067a75 1-15,17-35,40-160,163-165,168-205,207,214-229,231-241,243-255,257-261,263-278,280-283,285-289,294-301,313,316-317,362-373,375-396,406,436,440-478,480-484,486,488-492,494-539,541-544,559-568,571-576,581-633
+  s_0e56fa40cb323c::t_48134e78aa949d 399-400,407-433,437-439
+  s_d21b3d7f6db563::t_97083daa82155e 545-558,569-570
+  s_d21b3d7f6db563::t_c29cc0005c0ce7 256,262
+  s_c5bcf60a6cdfaa::t_998f79c8a70fd6 290-293,302-312
+  s_a4a87c6fd542e5::t_38aac35cd70394 314-315,318-361
+  s_0e56fa40cb323c::t_feb55ea9cc4798 540
+  s_a4a87c6fd542e5::t_6a2bb78b330445 485,487
+  s_a4a87c6fd542e5::t_7ac619b96b5d23 16
+  s_d21b3d7f6db563::t_12161df16f80ed 493
+  s_0e56fa40cb323c::t_3963640146aa04 435
+  s_0e56fa40cb323c::t_5868873947579d 401-402,404-405
+  s_d21b3d7f6db563::t_9ec1fa03374c9d 279,284
+  s_d21b3d7f6db563::t_aeb9cc81f1c0be 161-162,166-167
+  s_d21b3d7f6db563::t_6a1b3be26b100e 206,208-213
+  s_d21b3d7f6db563::t_96846eaaa358c7 577-580
+  s_d21b3d7f6db563::t_e9f3cf0846c9c9 230
+  s_d21b3d7f6db563::t_ff540da5e7d50c 374
+  s_a4a87c6fd542e5::t_8d5ed1d15bfa07 36-39
+  s_d21b3d7f6db563::t_ca9be3c4374918 634-636
+  s_446424daedca15::t_d8689a5329edc7 637-983
+index.html
+  s_c5bcf60a6cdfaa::t_05a9bef194e927 413
+  s_c5bcf60a6cdfaa::t_04b505838f1349 388
+  s_e3812e5b862cd8::t_b5ab0ed692becc 182-210
+  s_fc80a5cefae39c::t_64e6fdf106a8a4 1-181,211-387,389-412,414-438
+fga_store.py
+  s_d21b3d7f6db563::t_8162e1b50597f8 1-229
+  s_d21b3d7f6db563::t_d224401ec683ba 230-232
+  s_446424daedca15::t_ac7f7e16a327b5 233-255
+fga_evaluators.py
+  s_d21b3d7f6db563::t_ff4a3c0f8329ba 1-33,35-241,243-282,284-308
+  s_fd8a68180887fc::t_4ec3b5291dd649 34
+  s_fd8a68180887fc::t_9a2f6b8dbf3b26 242,283,309
+run_fga_eval.py
+  s_fd8a68180887fc::t_4f8fb87cf785c5 171
+  s_fd8a68180887fc::t_0cc8f390ad1078 177,182
+  s_d21b3d7f6db563::t_abc58a8927ec8b 1,4,7,12-20,22-24,26-32,35-160,393,395,397,399-466,468-469,471-481,487-488,490-491,495-496,499,501-507,509-511,513,515,517,521,524-527
+  s_fd8a68180887fc::t_820255b73b004d 233
+  s_fd8a68180887fc::t_c11ec2d854334b 228
+  s_fd8a68180887fc::t_4671fa362f0433 360,374
+  s_fd8a68180887fc::t_28ceffb1231d65 497
+  s_fd8a68180887fc::t_5b6a44c82780a7 277
+  s_fd8a68180887fc::t_8a69ae57886419 2-3,5-6,8-11,21,25,33-34,161-170,172-176,178-181,183-227,229-232,234-276,278-281,283-359,361-373,375-392,394,396,398,467,470,482-486,489,492-494,498,500,508,512,514,516,518-520,522-523
+  s_fd8a68180887fc::t_f1ecd1a2dad1f3 282
+server.py
+  s_9901731a4ab0d2::t_572f56f9aad030 156-157
+  s_fc80a5cefae39c::t_a7115e9cabf9b0 1-33,35-74,79,81-88,91-98,100-102,105,111-125,127-129,131,137-139,141-143,145,150-155,158-244,258-259,268-270,273,275,285,298,302,304,309,311
+  s_e3812e5b862cd8::t_0b0e4a4dcfa09a 99,103-104,106-110
+  s_e3812e5b862cd8::t_a79b510442cee1 34
+  s_e3812e5b862cd8::t_ad55684850f910 126,130,132-136,140,144,146-149
+  s_e3812e5b862cd8::t_78d59d1e31f913 75-78
+  s_9901731a4ab0d2::t_d73337d863be34 80,89-90
+  s_fc80a5cefae39c::t_66547081c87adb 245-247,255-257
+  s_fc80a5cefae39c::t_636c76e23422f3 260-262,265-267
+  s_fc80a5cefae39c::t_4d8994bd458fad 271-272
+  s_fc80a5cefae39c::t_251c55a999c1e6 274
+  s_fc80a5cefae39c::t_92b724070352bb 276-278,282-284
+  s_fc80a5cefae39c::t_1bfa8180f9bf8e 286-288,295-297
+  s_fc80a5cefae39c::t_78e4a33febe780 299-301
+  s_fc80a5cefae39c::t_69507ac2ba3395 303
+  s_fc80a5cefae39c::t_c29050e045534d 305-308
+  s_fc80a5cefae39c::t_4997fab3f01cbb 310
+  s_fc80a5cefae39c::t_0ef8f971016c72 312-314
+run_incident_scenarios.py
+  s_9e68404d8a5b24::t_69df66e9a8d64d 303-306,310,314-322,324,326-327,329,331
+  s_9e68404d8a5b24::t_05e06391fc05d2 1-302,307-309,311-313,323,325,328,330,332-376,389-391,402-403,407-410,412-421,424-425,427-525
+  s_9e68404d8a5b24::t_19c9c687e27f10 411
+  s_9e68404d8a5b24::t_d99d009990cb93 377-388,392-401,404-406,422-423,426
+DEMO_EXPANSION_PLAN.md
+  s_446424daedca15::t_5f61004563e318 1-249
+customer_store.py
+  s_446424daedca15::t_be1de23a44dcc9 1-249
+requirements.txt
+  s_446424daedca15::t_2bed0c3163682d 6-7
+run_customer_samples.py
+  s_446424daedca15::t_a72b7a2054b860 1-109
+test_agent_to_agent.py
+  s_446424daedca15::t_ad00becf50e423 1-109
+test_customer_observability.py
+  s_446424daedca15::t_efa54f1690dc25 1-346
+test_customer_operations.py
+  s_446424daedca15::t_dfda8ec1734222 1-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f392c963ac6f445e21bda015134040251ba3231e",
+  "prompts": {},
+  "humans": {
+    "h_a86a5c27becfe4": {
+      "author": "Joel Johnson <joel.johnson@langchain.dev>"
+    }
+  },
+  "sessions": {
+    "s_0e56fa40cb323c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82965382-74aa-4c22-9118-a3995f842461",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_446424daedca15": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d9dc-625e-7860-9421-e9a89cf5ec51",
+        "model": "unknown"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_9901731a4ab0d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3d484cb2-471f-484a-b687-c2b609a9edd9",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_9e68404d8a5b24": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c08d1e24-1cc6-43d4-ba8c-3f3e801b4218",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_a4a87c6fd542e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84eb5de3-9db0-4961-84fe-8ce55d44a019",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_c5bcf60a6cdfaa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa0315f3-c4f1-4033-9ce1-656c0f4aeed4",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_d21b3d7f6db563": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dcb7e564-1c01-4c4f-a147-7cee3b7e9a3b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_e3812e5b862cd8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2bb965df-548f-42d0-b489-d4c8d20c6677",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_fc80a5cefae39c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "794ac6ec-77ce-4520-ab8e-90d4daa87ea1",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_fcb40564742564": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f73b8112-63a2-44c0-862e-c337ce9d9cc6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    },
+    "s_fd8a68180887fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9743467e-0523-4a05-bd39-55e9934b7519",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    }
+  }
+}
