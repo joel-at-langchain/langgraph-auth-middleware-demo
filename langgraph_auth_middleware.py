@@ -19,6 +19,7 @@ Run
 """
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -282,7 +283,15 @@ STRATEGIES: list[tuple[str, Callable, list[str]]] = [
 
 @ls.traceable(name="auth_middleware_demo")
 async def main():
-    llm = ChatAnthropic(model="claude-sonnet-4-20250514")
+    base_url = os.environ.get("BASE_URL")
+    # The Anthropic SDK appends /v1/messages, so strip a trailing /v1
+    # to avoid a doubled path through the gateway.
+    if base_url and base_url.rstrip("/").endswith("/v1"):
+        base_url = base_url.rstrip("/")[:-3]
+    llm = ChatAnthropic(
+        model="claude-sonnet-4-5-20250929",
+        **({"base_url": base_url} if base_url else {}),
+    )
     tools = [fetch_user_profile]
     user_msg = "Please fetch the profile for user u-1234."
 

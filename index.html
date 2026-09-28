@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Customer Operations · Governance Lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #dce5f4; background: #0b1120; }
+    * { box-sizing: border-box; } [hidden] { display: none !important; }
+    body { margin: 0; height: 100dvh; display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 19px 26px; border-bottom: 1px solid #24324b; }
+    h1 { font-size: 19px; margin: 3px 0; letter-spacing: -.4px; } h2 { font-size: 14px; margin: 0 0 12px; }
+    .eyebrow { text-transform: uppercase; letter-spacing: 1.5px; font-size: 10px; color: #7bd4c9; font-weight: 700; }
+    .muted { color: #93a3bd; font-size: 12px; line-height: 1.6; } .counts { text-align: right; white-space: pre-line; }
+    main { display: grid; grid-template-columns: 255px minmax(350px, 1fr) 325px; flex: 1; min-height: 0; }
+    aside { padding: 22px 18px; overflow: auto; background: #10192a; }
+    .context { border-right: 1px solid #24324b; } .activity { border-left: 1px solid #24324b; }
+    label { display: block; color: #aebdd3; font-size: 11px; margin: 16px 0 6px; }
+    select, textarea, input { width: 100%; font: inherit; font-size: 12px; border: 1px solid #34455f; border-radius: 8px; background: #152137; color: #eef3fc; padding: 10px; }
+    select:focus, textarea:focus, input:focus { outline: 2px solid #42bcb0; outline-offset: 2px; }
+    textarea { resize: vertical; min-height: 76px; max-height: 180px; line-height: 1.5; font-size: 14px; }
+    button { cursor: pointer; font: inherit; border-radius: 8px; border: 1px solid #34455f; background: #19263d; color: #dde8f7; padding: 9px 13px; font-size: 12px; }
+    button:hover { background: #263853; } button:disabled { cursor: default; opacity: .45; }
+    .primary { background: #70ddc7; color: #062f2a; border-color: #70ddc7; font-weight: 700; }
+    .primary:hover { background: #a2eddd; } .danger { color: #ffb1b7; }
+    .divider { border-top: 1px solid #293850; margin: 22px 0; } .starter { text-align: left; width: 100%; margin: 0 0 8px; line-height: 1.5; background: transparent; }
+    .chat { display: flex; flex-direction: column; min-height: 0; }
+    .workbench { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+    .workbench .chat { flex: 1; }
+    .workspace-tabs { display: flex; gap: 8px; padding: 12px 24px; border-bottom: 1px solid #24324b; }
+    .workspace-tabs button[aria-pressed="true"] { border-color: #70ddc7; color: #9ee9dc; background: #183432; }
+    .inbox { flex: 1; overflow: auto; padding: 22px 24px; }
+    .inbox h2 { font-size: 20px; margin-bottom: 6px; }
+    .inbox-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
+    #inbox-notice { min-height: 22px; color: #b5d8ce; }
+    #inbox-list { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow: auto; margin: 16px 0; }
+    .approval-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 13px; text-align: left; }
+    .approval-row[aria-pressed="true"] { border-color: #77cec2; background: #1a323e; }
+    .approval-row strong { display: block; font-size: 13px; margin-bottom: 4px; }
+    .approval-row small { display: block; color: #a0b2ca; line-height: 1.5; }
+    .approval-status { font-size: 10px; border-radius: 20px; padding: 4px 8px; background: #35415a; white-space: nowrap; }
+    .approval-status.pending { background: #584326; color: #ffdc9d; }
+    .approval-status.approved { background: #224a42; color: #93e3cb; }
+    .approval-status.failed, .approval-status.stale, .approval-status.rejected { background: #502f3b; color: #ffb7c2; }
+    #inbox-detail { border: 1px solid #3c536a; border-radius: 10px; padding: 18px; background: #111d30; }
+    #inbox-detail h3 { margin: 0 0 10px; font-size: 16px; }
+    #inbox-proposal { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.65; max-height: 230px; overflow: auto; }
+    #inbox-metadata { white-space: pre-line; overflow-wrap: anywhere; }
+    #inbox-access { padding: 20px; border: 1px dashed #3b506c; border-radius: 10px; margin-top: 18px; }
+    .chat-top { display: flex; align-items: center; justify-content: space-between; padding: 17px 24px; border-bottom: 1px solid #1f2c42; gap: 12px; }
+    #status { font-size: 12px; color: #7bd4c9; }
+    #messages { flex: 1; overflow: auto; padding: 24px; scroll-behavior: smooth; }
+    .welcome { max-width: 550px; margin: 42px auto; } .welcome h2 { font-size: 27px; letter-spacing: -.8px; }
+    .welcome p { font-size: 14px; line-height: 1.8; color: #a4b4cc; }
+    .message { margin: 0 0 18px; padding: 17px 18px; border: 1px solid #2a3952; background: #111d30; border-radius: 12px; white-space: pre-wrap; line-height: 1.65; font-size: 13px; overflow-wrap: anywhere; }
+    .message.user { background: #1d3046; margin-left: 35px; border-color: #345570; }
+    .message.error { border-color: #a44255; color: #ffbec6; }
+    .message .label { white-space: normal; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #89a6c9; margin-bottom: 8px; }
+    .message.streaming { border-color: #4fa79f; }
+    .message.streaming .response-text::after { content: '▍'; color: #70ddc7; }
+    .composer { border-top: 1px solid #24324b; padding: 18px 24px; background: #0e1727; }
+    .compose-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 10px; }
+    .event { border-left: 2px solid #526884; margin: 0 0 10px; padding: 10px; background: #142137; border-radius: 0 6px 6px 0; }
+    .event.allow, .event.completed { border-color: #64ccb7; } .event.deny, .event.failed { border-color: #f58195; }
+    .event.approval { border-color: #f3c87b; } .event summary { cursor: pointer; font-size: 11px; line-height: 1.5; }
+    .event small { display: block; font-size: 10px; color: #97aec9; overflow-wrap: anywhere; margin-top: 4px; }
+    .event pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; color: #b4c6e0; }
+    #review { border: 1px solid #b78743; background: #2b241d; padding: 18px; border-radius: 10px; margin: 0 24px 16px; }
+    #review h2 { color: #f8d295; } #review-content { max-height: 150px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+    .review-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    #new-chat { white-space: nowrap; } details.advanced { margin-top: 15px; } details.advanced summary { font-size: 12px; cursor: pointer; color: #a0b0c8; }
+    @media(max-width: 1100px) { main { grid-template-columns: 220px minmax(300px, 1fr); } .activity { grid-column: 1 / -1; max-height: 240px; border-top: 1px solid #24324b; } }
+    @media(max-width: 650px) { body { height: auto; min-height: 100dvh; } main { display: flex; flex-direction: column; } .context { max-height: 400px; } .chat { min-height: 650px; } #messages { max-height: 700px; } .counts { display: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div><div class="eyebrow">Governance Lab</div><h1>Customer Operations</h1></div>
+    <div class="counts muted" id="counts">Loading fictional workspaces…</div>
+  </header>
+  <main>
+    <aside class="context">
+      <h2>Your workspace</h2>
+      <p class="muted">Fictional records · simulated identities.<br>Changing context starts a fresh chat.</p>
+      <label for="tenant">Tenant</label><select id="tenant" aria-label="Tenant"></select>
+      <label for="persona">Acting as</label><select id="persona" aria-label="Persona"></select>
+      <label for="profile">Assistant profile</label><select id="profile"></select>
+      <details class="advanced"><summary>Invocation controls</summary>
+        <label for="mode">Route</label><select id="mode"><option value="tool">Chat · model chooses tools</option><option value="handoff">Explicit analyst handoff</option></select>
+        <div id="handoff-controls" hidden><label for="account">Account for handoff</label><select id="account"></select><p class="muted">This route sends the selected account directly to the governed specialist.</p></div>
+      </details>
+      <div class="divider"></div>
+      <h2>Explore a capability</h2><p class="muted">These fill the composer. Edit freely.</p><div id="starters"></div>
+    </aside>
+    <div class="workbench">
+      <nav class="workspace-tabs" aria-label="Workspace views"><button id="chat-tab" aria-pressed="true">Agent chat</button><button id="inbox-tab" aria-pressed="false">Approvals inbox</button></nav>
+    <section class="chat" id="chat-panel" aria-label="Conversation">
+      <div class="chat-top"><div><h2 style="margin-bottom:4px">Chat with Customer Operations</h2><span id="status" role="status">Ready</span></div><button id="new-chat">New chat</button></div>
+      <div id="messages" aria-live="polite"><div class="welcome"><div class="eyebrow">From evidence to action</div><h2>Get ready for the next customer conversation.</h2><p>Investigate an account, ask the renewal analyst for a second view, then save a brief with human review. Follow-up questions stay in this conversation.</p><p>Start with “Prepare me for Meridian Retail’s renewal meeting.”</p></div></div>
+      <section id="review" aria-label="Human review" hidden>
+        <h2>Review this account change</h2><div id="review-summary" class="muted"></div><pre id="review-content"></pre>
+        <p class="muted">Also queued in the lead’s approvals inbox. Switching persona leaves this request pending.</p>
+        <label for="reviewer">Simulated reviewer · eligible for this account</label><select id="reviewer"></select>
+        <label for="review-comment">Review note (optional)</label><input id="review-comment" maxlength="500" placeholder="Reason or conditions">
+        <div class="review-actions"><button class="primary" data-decision="approve">Approve</button><button data-decision="conditional">Hold for further review</button><button class="danger" data-decision="deny">Reject</button></div>
+      </section>
+      <form id="composer" class="composer"><label for="prompt" class="muted" style="margin-top:0">Message the assistant</label><textarea id="prompt" maxlength="4000" placeholder="Ask about an account, its open issues, or a saved brief…"></textarea><div class="compose-actions"><span class="muted">Ctrl / ⌘ + Enter to send · memory lasts for this chat</span><button id="send" class="primary" type="submit">Send message</button></div></form>
+    </section>
+    <section class="inbox" id="inbox-panel" aria-label="Approvals inbox" hidden>
+      <div class="eyebrow">Human review</div><h2>Approvals inbox</h2>
+      <p id="inbox-identity" class="muted"></p>
+      <p class="muted">Review proposed account changes across runs in this tenant. Nothing changes until an eligible reviewer explicitly approves.</p>
+      <div class="inbox-toolbar"><button id="populate-approvals" class="primary">Populate demo approvals</button><button id="refresh-approvals">Refresh inbox</button></div>
+      <p class="muted">Demo button: two brief updates and one archive request, using real paused agent runs. Existing pending samples are reused.</p>
+      <div id="inbox-notice" class="muted" role="status" aria-live="polite"></div>
+      <div id="inbox-access" hidden><p id="inbox-access-text" class="muted"></p><button id="inbox-switch-lead">Switch to lead</button></div>
+      <div id="inbox-list" aria-label="Approval requests"></div>
+      <section id="inbox-detail" aria-label="Selected approval" hidden>
+        <h3 id="inbox-title"></h3><div id="inbox-metadata" class="muted"></div>
+        <label>Proposed content</label><pre id="inbox-proposal"></pre>
+        <p id="inbox-outcome" class="muted"></p>
+        <label for="inbox-comment">Reviewer note (optional)</label><textarea id="inbox-comment" maxlength="500" placeholder="Explain your decision or what needs further review"></textarea>
+        <div class="review-actions"><button class="primary" data-inbox-decision="approve">Approve request</button><button data-inbox-decision="conditional">Hold request</button><button class="danger" data-inbox-decision="deny">Reject request</button></div>
+      </section>
+    </section>
+    </div>
+    <aside class="activity" aria-label="Activity feed"><h2>Governance activity</h2><p class="muted">Live checks, agent calls, and review outcomes. Expand any event to inspect its evidence.</p><div id="activity"></div></aside>
+  </main>
+  <script>
+    'use strict';
+    const el = id => document.getElementById(id);
+    let catalog, conversationId = null, pending = null, source = null, busy = false;
+    let activeView='chat', canReview=false, inboxItems=[], selectedApprovalId=null, displayedApprovalId=null;
+    let contextRevision=0, inboxSequence=0, inboxLoading=false, inboxActionBusy=false;
+    const welcome = el('messages').firstElementChild.cloneNode(true);
+    async function api(path, body) {
+      const response = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      const data = await response.json();
+      if (!response.ok) { const error=new Error(data.error || 'Request failed'); error.status=response.status; throw error; }
+      return data;
+    }
+    function options(select, items, label) {
+      select.replaceChildren();
+      items.forEach(item => { const option = document.createElement('option'); option.value=item.id; option.textContent=label(item); select.appendChild(option); });
+    }
+    function setBusy(value) {
+      busy=value;
+      ['tenant','persona','profile','mode','account'].forEach(id => el(id).disabled=busy);
+      el('send').disabled=busy || Boolean(pending);
+      el('new-chat').disabled=busy;
+      document.querySelectorAll('[data-decision]').forEach(button => button.disabled=busy);
+      el('status').textContent=busy ? 'Working…' : pending ? 'Waiting for human review' : 'Ready';
+      inboxButtons();
+    }
+    function message(label, content, kind='assistant') {
+      const card=document.createElement('div'); card.className='message '+kind;
+      const heading=document.createElement('div'); heading.className='label'; heading.textContent=label;
+      const text=document.createElement('div'); text.className='response-text'; text.textContent=content;
+      if (el('messages').querySelector('.welcome')) el('messages').replaceChildren();
+      card.append(heading,text); el('messages').appendChild(card); el('messages').scrollTop=el('messages').scrollHeight;
+      return {card,heading,text};
+    }
+    function newChat() {
+      if (source) source.close(); source=null; conversationId=null; pending=null;
+      el('review').hidden=true; el('messages').replaceChildren(welcome.cloneNode(true)); el('activity').replaceChildren();
+      resetInbox();
+      setBusy(false);
+    }
+    function activity(name, data) {
+      const card=document.createElement('details');
+      const outcome=data.decision || (name.includes('failed') ? 'failed' : name.includes('denied') ? 'deny' : name.includes('completed') ? 'completed' : name.includes('hitl') ? 'approval' : '');
+      card.className='event '+outcome;
+      const heading=document.createElement('summary'); heading.textContent=name.replaceAll('_',' ') + (data.decision ? ' · '+data.decision : '');
+      const resource=document.createElement('small'); resource.textContent=data.resource || data.child_agent_id || data.tool_name || '';
+      const detail=document.createElement('pre'); detail.textContent=JSON.stringify(data,null,2);
+      card.append(heading,resource,detail); el('activity').prepend(card);
+    }
+    function showReview(data) {
+      pending=data; el('review').hidden=false;
+      el('review-summary').textContent=data.operation.replaceAll('_',' ')+' · '+data.account_name+' · current version '+data.expected_version;
+      el('review-content').textContent=data.content;
+      options(el('reviewer'),data.reviewers,user=>user.name);
+      el('review-comment').value='';
+    }
+    function connect(runId) {
+      if (source) source.close();
+      source=new EventSource('/api/stream/'+encodeURIComponent(runId));
+      const active=source;
+      const responses=new Map();
+      let lastEventId=0;
+      function listen(name, handler) {
+        active.addEventListener(name,event=>{
+          if (source!==active) return;
+          const id=Number(event.lastEventId);
+          if (id && id<=lastEventId) return;
+          if (id) lastEventId=id;
+          handler(JSON.parse(event.data));
+        });
+      }
+      function responseFor(id) {
+        if (!responses.has(id)) responses.set(id,message('Assistant',''));
+        return responses.get(id);
+      }
+      function finish(response, label='Assistant') {
+        response.card.classList.remove('streaming');
+        response.card.setAttribute('aria-busy','false');
+        response.heading.textContent=label;
+      }
+      function interrupted() {
+        responses.forEach(response=>{
+          if (response.card.classList.contains('streaming')) finish(response,'Assistant · interrupted');
+        });
+      }
+      ['tool_intent','authorization_started','authorization_completed','tenant_verification_started','tenant_verification_completed','request_denied','fga_check','fga_decision','tool_completed','tool_failed','tool_denied','agent_call_started','agent_call_completed','agent_call_denied','agent_call_failed','hitl_request','hitl_response'].forEach(name=>{
+        listen(name,data=>activity(name,data));
+      });
+      listen('response_start',data=>{
+        const response=responseFor(data.message_id);
+        response.card.classList.add('streaming'); response.card.setAttribute('aria-busy','true');
+        response.heading.textContent='Assistant · responding'; el('status').textContent='Responding…';
+      });
+      listen('response_delta',data=>{
+        const response=responseFor(data.message_id);
+        response.text.textContent+=data.content;
+        el('messages').scrollTop=el('messages').scrollHeight;
+      });
+      listen('response_end',data=>{
+        finish(responseFor(data.message_id),data.intermediate ? 'Assistant · tool update' : 'Assistant');
+        el('status').textContent='Working…';
+      });
+      listen('agent_response',data=>{
+        const response=responseFor(data.message_id);
+        response.text.textContent=data.content; finish(response);
+        el('messages').scrollTop=el('messages').scrollHeight;
+      });
+      listen('approval_required',showReview);
+      listen('done',data=>{
+        active.close(); source=null;
+        if (!data.paused) { pending=null; el('review').hidden=true; }
+        setBusy(false);
+        if (activeView==='inbox') loadInbox();
+      });
+      active.addEventListener('error',event=>{
+        if (source!==active) return;
+        if (event.data) { interrupted(); message('Run error',JSON.parse(event.data).message,'error'); }
+        else if (active.readyState===EventSource.CLOSED) {
+          interrupted(); source=null; setBusy(false);
+          message('Connection interrupted','The activity stream disconnected. Start a new chat if the current turn cannot finish.','error');
+        } else {
+          // EventSource reconnects with Last-Event-ID; the server resumes the
+          // same owned run, and listen() ignores any already rendered events.
+          el('status').textContent='Reconnecting…';
+        }
+      });
+    }
+    async function refresh(initial=false) {
+      const revision=contextRevision;
+      const params=new URLSearchParams({tenant_id:el('tenant').value || 'northstar',user_id:el('persona').value || 'user:northstar/csm',profile:el('profile').value || 'customer-ops'});
+      const data=await api('/api/catalog?'+params);
+      if(revision!==contextRevision) return;
+      catalog=data;
+      canReview=Boolean(data.can_review_approvals);
+      if (initial) {
+        options(el('tenant'),data.tenants,item=>item.name);
+        options(el('persona'),data.tenants[0].users,item=>item.name+' · '+({csm:'Customer success',support:'Support',lead:'CS lead'}[item.role]));
+        options(el('profile'),data.profiles,item=>item.name);
+      }
+      options(el('account'),data.accounts,item=>item.name);
+      const example=data.scenarios[0].prompt;
+      welcome.querySelector('p:last-child').textContent='Start with “'+example+'”';
+      const currentWelcome=el('messages').querySelector('.welcome p:last-child');
+      if(currentWelcome) currentWelcome.textContent=welcome.querySelector('p:last-child').textContent;
+      el('counts').textContent=data.counts.tenants+' tenants · '+data.counts.accounts+' accounts · '+data.counts.relationship_tuples+' relationship tuples\nDemo date: '+data.reference_date;
+      el('starters').replaceChildren();
+      data.scenarios.forEach(item=>{ const button=document.createElement('button'); button.className='starter'; button.textContent=item.name; button.onclick=()=>{el('prompt').value=item.prompt;el('prompt').focus();};el('starters').appendChild(button); });
+      renderInboxAccess();
+      if(activeView==='inbox') await loadInbox();
+    }
+
+    function reviewerContext() { return {tenant_id:el('tenant').value,user_id:el('persona').value}; }
+    function clearInboxData() {
+      inboxItems=[]; selectedApprovalId=null; displayedApprovalId=null;
+      el('inbox-list').replaceChildren(); el('inbox-detail').hidden=true; el('inbox-comment').value='';
+      ['inbox-title','inbox-metadata','inbox-proposal','inbox-outcome'].forEach(id=>el(id).textContent='');
+      el('inbox-tab').textContent='Approvals inbox';
+    }
+    function resetInbox() {
+      contextRevision++; inboxSequence++; inboxLoading=false; inboxActionBusy=false; canReview=false;
+      clearInboxData();
+      el('inbox-notice').textContent=''; el('inbox-identity').textContent='';
+    }
+    function inboxButtons() {
+      el('populate-approvals').disabled=!canReview || inboxActionBusy || busy;
+      el('refresh-approvals').disabled=!canReview || inboxActionBusy;
+      el('inbox-switch-lead').disabled=busy;
+      const selected=inboxItems.find(item=>item.id===selectedApprovalId);
+      document.querySelectorAll('[data-inbox-decision]').forEach(button=>button.disabled=!selected || selected.status!=='pending' || inboxActionBusy);
+      el('inbox-comment').disabled=!selected || selected.status!=='pending' || inboxActionBusy;
+    }
+    function renderInboxAccess() {
+      const tenant=catalog?.tenants.find(item=>item.id===el('tenant').value);
+      const persona=tenant?.users.find(item=>item.id===el('persona').value);
+      const lead=tenant?.users.find(item=>item.role==='lead');
+      el('inbox-identity').textContent=persona ? `${persona.name} · ${tenant.name} · simulated reviewer identity` : '';
+      el('inbox-access').hidden=canReview;
+      el('inbox-access-text').textContent='Only users with account reviewer and reader grants can see proposals. '+(lead ? `Select ${lead.name} to try this tenant’s lead inbox.` : 'Select an eligible lead.');
+      el('inbox-switch-lead').textContent=lead ? 'Switch to '+lead.name : 'Switch to lead';
+      inboxButtons();
+    }
+    function applyInbox(data) {
+      inboxItems=data.items;
+      if(!inboxItems.some(item=>item.id===selectedApprovalId)) selectedApprovalId=inboxItems[0]?.id || null;
+      el('inbox-tab').textContent='Approvals inbox'+(data.pending_count ? ' ('+data.pending_count+')' : '');
+      el('inbox-list').replaceChildren();
+      if(!inboxItems.length) {
+        const empty=document.createElement('p'); empty.className='muted';
+        empty.textContent='No approvals to review. Populate demo approvals or ask the agent to save a brief.';
+        el('inbox-list').appendChild(empty);
+      }
+      inboxItems.forEach(item=>{
+        const row=document.createElement('button'); row.className='approval-row'; row.setAttribute('aria-pressed',String(item.id===selectedApprovalId));
+        const body=document.createElement('span'), title=document.createElement('strong'), description=document.createElement('small'), status=document.createElement('span');
+        title.textContent=item.account_name;
+        description.textContent=(item.operation==='archive_account_brief' ? 'Archive brief' : 'Update brief')+' · '+item.requester+(item.demo ? ' · demo' : '');
+        status.className='approval-status '+item.status; status.textContent=item.status==='resuming' ? 'Applying decision…' : item.status;
+        body.append(title,description); row.append(body,status);
+        row.onclick=()=>{selectedApprovalId=item.id;applyInbox(data);}; el('inbox-list').appendChild(row);
+      });
+      const selected=inboxItems.find(item=>item.id===selectedApprovalId);
+      el('inbox-detail').hidden=!selected;
+      if(selected) {
+        if(displayedApprovalId!==selected.id) { el('inbox-comment').value=selected.comment || ''; displayedApprovalId=selected.id; }
+        el('inbox-title').textContent=selected.account_name+' · '+(selected.operation==='archive_account_brief' ? 'Archive brief' : 'Update brief');
+        el('inbox-metadata').textContent=`Requested by ${selected.requester} · brief version ${selected.expected_version}\nCreated ${new Date(selected.created_at).toLocaleString()}\nSource run: ${selected.request_run_id}\nConversation: ${selected.conversation_id}`+(selected.resolution_run_id ? '\nDecision run: '+selected.resolution_run_id : '');
+        el('inbox-proposal').textContent=selected.content;
+        el('inbox-outcome').textContent=selected.status==='pending' ? 'Review the exact proposed content. The original user’s permissions are checked again on resume.' :
+          selected.status==='resuming' ? 'Decision submitted. Waiting for the original run to confirm its outcome.' :
+          selected.status==='held' ? 'Held for further review. No change was made; request a new proposal when ready.' :
+          selected.status==='rejected' ? 'Rejected. No change was made.' :
+          selected.status==='stale' ? 'Stale proposal. The brief changed; ask the agent for a new proposal.' :
+          selected.status==='approved' ? 'Approved and '+selected.outcome+'. The original run confirmed the change.' : 'Execution failed. No successful change was confirmed.';
+      }
+      inboxButtons();
+    }
+    async function loadInbox() {
+      if(!canReview || inboxLoading) return;
+      const revision=contextRevision, sequence=++inboxSequence;
+      inboxLoading=true;
+      try {
+        const data=await api('/api/approvals?'+new URLSearchParams(reviewerContext()));
+        if(revision!==contextRevision || sequence!==inboxSequence) return;
+        applyInbox(data);
+      } catch(error) {
+        if(revision!==contextRevision || sequence!==inboxSequence) return;
+        el('inbox-notice').textContent=error.message;
+        if(error.status===403 || error.status===401) {
+          canReview=false; clearInboxData(); renderInboxAccess();
+        }
+      } finally { if(sequence===inboxSequence) inboxLoading=false; }
+    }
+    function switchView(view) {
+      activeView=view; el('chat-panel').hidden=view!=='chat'; el('inbox-panel').hidden=view!=='inbox';
+      el('chat-tab').setAttribute('aria-pressed',String(view==='chat')); el('inbox-tab').setAttribute('aria-pressed',String(view==='inbox'));
+      if(view==='inbox') {renderInboxAccess();loadInbox();}
+    }
+    async function populateInbox() {
+      if(!canReview || inboxActionBusy || busy) return;
+      const revision=contextRevision; inboxSequence++; inboxLoading=false; inboxActionBusy=true; inboxButtons();
+      el('inbox-notice').textContent='Preparing real paused approval requests…';
+      try {
+        const data=await api('/api/approvals/demo',reviewerContext());
+        if(revision!==contextRevision) return;
+        applyInbox(data.inbox);
+        el('inbox-notice').textContent=`Started ${data.created} demo requests; reused ${data.reused} pending requests. No records were changed.`+(data.limit_reached ? ' Demo generation limit reached; restart the server for fresh fixtures.' : '');
+      } catch(error) { if(revision===contextRevision) el('inbox-notice').textContent=error.message; }
+      finally {if(revision===contextRevision){inboxActionBusy=false;inboxButtons();}}
+    }
+    async function reviewInbox(decision) {
+      const selected=inboxItems.find(item=>item.id===selectedApprovalId);
+      if(!selected || selected.status!=='pending' || inboxActionBusy) return;
+      const revision=contextRevision; inboxSequence++; inboxLoading=false; inboxActionBusy=true; inboxButtons();
+      try {
+        await api('/api/approvals/'+encodeURIComponent(selected.id)+'/decision',{...reviewerContext(),decision,comment:el('inbox-comment').value});
+        if(revision!==contextRevision) return;
+        el('inbox-notice').textContent='Decision submitted. The originating run is resuming.';
+        await loadInbox();
+      } catch(error) {if(revision===contextRevision){el('inbox-notice').textContent=error.message;await loadInbox();}}
+      finally {if(revision===contextRevision){inboxActionBusy=false;inboxButtons();}}
+    }
+    async function syncOwnerReview() {
+      if(!pending || busy || !conversationId) return;
+      const cid=conversationId, approvalId=pending.approval_id;
+      try {
+        const data=await api('/api/approvals/'+encodeURIComponent(approvalId)+'/status');
+        if(cid!==conversationId || pending?.approval_id!==approvalId || busy) return;
+        if(data.resolution_run_id) {pending=null;el('review').hidden=true;setBusy(true);connect(data.resolution_run_id);}
+        else if(data.status!=='pending') {pending=null;el('review').hidden=true;message('Review status','This proposal is '+data.status+'. Start a new chat to request a fresh proposal.');setBusy(false);}
+      } catch(error) { /* A reload recovers an expired owner session; do not expose another session's state. */ }
+    }
+    el('chat-tab').onclick=()=>switchView('chat');
+    el('inbox-tab').onclick=()=>switchView('inbox');
+    el('populate-approvals').onclick=populateInbox;
+    el('refresh-approvals').onclick=()=>{el('inbox-notice').textContent='';loadInbox();};
+    el('inbox-switch-lead').onclick=async()=>{
+      if(busy) return;
+      const lead=catalog?.tenants.find(item=>item.id===el('tenant').value)?.users.find(item=>item.role==='lead');
+      if(lead){el('persona').value=lead.id;await el('persona').onchange();}
+    };
+    document.querySelectorAll('[data-inbox-decision]').forEach(button=>button.onclick=()=>reviewInbox(button.dataset.inboxDecision));
+    setInterval(()=>{if(document.visibilityState==='hidden') return;if(activeView==='inbox' && !inboxActionBusy) loadInbox();syncOwnerReview();},4000);
+    el('tenant').onchange=async()=>{
+      newChat(); const tenant=catalog.tenants.find(item=>item.id===el('tenant').value);
+      options(el('persona'),tenant.users,item=>item.name+' · '+({csm:'Customer success',support:'Support',lead:'CS lead'}[item.role]));
+      try { await refresh(); } catch(error) { message('Error',error.message,'error'); }
+    };
+    ['persona','profile'].forEach(id=>el(id).onchange=async()=>{newChat();try {await refresh();} catch(error){message('Error',error.message,'error');}});
+    el('mode').onchange=()=>{el('handoff-controls').hidden=el('mode').value!=='handoff';};
+    el('new-chat').onclick=async()=>{newChat();try {await refresh();} catch(error){message('Error',error.message,'error');}};
+    el('composer').onsubmit=async(event)=>{
+      event.preventDefault(); if(busy || pending || !el('prompt').value.trim()) return;
+      const prompt=el('prompt').value.trim(); setBusy(true); message('You',prompt,'user');
+      try {
+        const result=await api('/api/run',{user_msg:prompt,tenant_id:el('tenant').value,user_id:el('persona').value,profile:el('profile').value,invocation_mode:el('mode').value,handoff_account:el('account').value,conversation_id:conversationId});
+        conversationId=result.conversation_id; el('prompt').value=''; connect(result.run_id);
+      } catch(error){message('Error',error.message,'error');setBusy(false);}
+    };
+    el('prompt').onkeydown=event=>{if(event.key==='Enter' && (event.ctrlKey||event.metaKey)){event.preventDefault();el('composer').requestSubmit();}};
+    document.querySelectorAll('[data-decision]').forEach(button=>button.onclick=async()=>{
+      if(!pending || busy) return; setBusy(true);
+      try {
+        const result=await api('/api/resume/'+encodeURIComponent(conversationId),{approval_id:pending.approval_id,reviewer:el('reviewer').value,decision:button.dataset.decision,comment:el('review-comment').value});
+        el('review').hidden=true; pending=null; connect(result.run_id);
+      } catch(error){message('Review error',error.message,'error');setBusy(false);}
+    });
+    refresh(true).catch(error=>message('Startup error',error.message,'error'));
+  </script>
+</body>
+</html>
