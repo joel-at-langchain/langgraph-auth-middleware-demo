@@ -26,3 +26,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .claude/
+
+# Generated trace manifests/reports contain run IDs and demo prompts.
+trace_batches/*.jsonl
+trace_batches/*.json

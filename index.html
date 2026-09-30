@@ -14,7 +14,7 @@
     .muted { color: #93a3bd; font-size: 12px; line-height: 1.6; } .counts { text-align: right; white-space: pre-line; }
     main { display: grid; grid-template-columns: 255px minmax(350px, 1fr) 325px; flex: 1; min-height: 0; }
     aside { padding: 22px 18px; overflow: auto; background: #10192a; }
-    .context { border-right: 1px solid #24324b; } .activity { border-left: 1px solid #24324b; }
+    .context { position: relative; border-right: 1px solid #24324b; } .activity { border-left: 1px solid #24324b; }
     label { display: block; color: #aebdd3; font-size: 11px; margin: 16px 0 6px; }
     select, textarea, input { width: 100%; font: inherit; font-size: 12px; border: 1px solid #34455f; border-radius: 8px; background: #152137; color: #eef3fc; padding: 10px; }
     select:focus, textarea:focus, input:focus { outline: 2px solid #42bcb0; outline-offset: 2px; }
@@ -23,7 +23,12 @@
     button:hover { background: #263853; } button:disabled { cursor: default; opacity: .45; }
     .primary { background: #70ddc7; color: #062f2a; border-color: #70ddc7; font-weight: 700; }
     .primary:hover { background: #a2eddd; } .danger { color: #ffb1b7; }
-    .divider { border-top: 1px solid #293850; margin: 22px 0; } .starter { text-align: left; width: 100%; margin: 0 0 8px; line-height: 1.5; background: transparent; }
+    .divider { border-top: 1px solid #293850; margin: 22px 0; }
+    .scenario { text-align: left; width: 100%; margin: 0 0 8px; line-height: 1.5; background: #142035; padding: 11px 12px; }
+    .scenario strong { display: block; font-size: 12px; font-weight: 600; }
+    .scenario small { display: block; color: #93a3bd; font-size: 11px; margin-top: 4px; }
+    .scenario:focus-visible { outline: 2px solid #70ddc7; outline-offset: 2px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     .chat { display: flex; flex-direction: column; min-height: 0; }
     .workbench { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
     .workbench .chat { flex: 1; }
@@ -89,8 +94,10 @@
         <label for="mode">Route</label><select id="mode"><option value="tool">Chat · model chooses tools</option><option value="handoff">Explicit analyst handoff</option></select>
         <div id="handoff-controls" hidden><label for="account">Account for handoff</label><select id="account"></select><p class="muted">This route sends the selected account directly to the governed specialist.</p></div>
       </details>
+      <details class="advanced"><summary>Default agent skills</summary><p class="muted">Deep Agents discovers permitted skill summaries. The assistant reads full instructions on demand. Every read is authorized; skills do not grant access.</p><div id="default-skills"></div></details>
       <div class="divider"></div>
-      <h2>Explore a capability</h2><p class="muted">These fill the composer. Edit freely.</p><div id="starters"></div>
+      <h2 id="scenarios-heading">Tenant scenarios</h2><p class="muted">Click to fill the message, then send when ready. Hover for the test and expected result.</p>
+      <p class="muted">Use the Chat route. Expectations reflect the selected persona and assistant with seeded permissions.</p><div id="scenarios" aria-labelledby="scenarios-heading"></div>
     </aside>
     <div class="workbench">
       <nav class="workspace-tabs" aria-label="Workspace views"><button id="chat-tab" aria-pressed="true">Agent chat</button><button id="inbox-tab" aria-pressed="false">Approvals inbox</button></nav>
@@ -163,12 +170,31 @@
     function newChat() {
       if (source) source.close(); source=null; conversationId=null; pending=null;
       el('review').hidden=true; el('messages').replaceChildren(welcome.cloneNode(true)); el('activity').replaceChildren();
+      el('scenarios').replaceChildren(); el('scenarios-heading').textContent='Tenant scenarios'; el('prompt').value='';
+      el('default-skills').replaceChildren();
       resetInbox();
       setBusy(false);
     }
+    function renderScenarios(data) {
+      const tenant=data.tenants.find(item=>item.id===el('tenant').value);
+      el('scenarios-heading').textContent=tenant ? tenant.name+' scenarios' : 'Tenant scenarios';
+      el('scenarios').replaceChildren();
+      data.scenarios.forEach((item,index)=>{
+        const button=document.createElement('button'); button.className='scenario'; button.type='button';
+        const title=document.createElement('strong'); title.textContent=item.name;
+        const account=document.createElement('small'); account.textContent=item.account;
+        const details=document.createElement('span'); details.className='sr-only'; details.id='scenario-description-'+index;
+        details.textContent=item.description+'\nExpected: '+item.expected;
+        button.title=details.textContent;
+        button.setAttribute('aria-describedby',details.id);
+        button.append(title,account);
+        button.onclick=()=>{el('prompt').value=item.prompt;switchView('chat');el('prompt').focus();};
+        el('scenarios').append(button,details);
+      });
+    }
     function activity(name, data) {
       const card=document.createElement('details');
-      const outcome=data.decision || (name.includes('failed') ? 'failed' : name.includes('denied') ? 'deny' : name.includes('completed') ? 'completed' : name.includes('hitl') ? 'approval' : '');
+      const outcome=data.decision || (name.includes('failed') || name.includes('rejected') ? 'failed' : name.includes('denied') ? 'deny' : name.includes('completed') ? 'completed' : name.includes('hitl') ? 'approval' : '');
       card.className='event '+outcome;
       const heading=document.createElement('summary'); heading.textContent=name.replaceAll('_',' ') + (data.decision ? ' · '+data.decision : '');
       const resource=document.createElement('small'); resource.textContent=data.resource || data.child_agent_id || data.tool_name || '';
@@ -211,7 +237,7 @@
           if (response.card.classList.contains('streaming')) finish(response,'Assistant · interrupted');
         });
       }
-      ['tool_intent','authorization_started','authorization_completed','tenant_verification_started','tenant_verification_completed','request_denied','fga_check','fga_decision','tool_completed','tool_failed','tool_denied','agent_call_started','agent_call_completed','agent_call_denied','agent_call_failed','hitl_request','hitl_response'].forEach(name=>{
+      ['tool_intent','authorization_started','authorization_completed','tenant_verification_started','tenant_verification_completed','request_denied','fga_check','fga_decision','tool_completed','tool_failed','tool_denied','tool_rejected','agent_call_started','agent_call_completed','agent_call_denied','agent_call_failed','hitl_request','hitl_response','skills_discovered','skill_instructions_loaded','sql_query_completed','sql_query_rejected','service_call_started','service_call_completed','service_call_failed'].forEach(name=>{
         listen(name,data=>activity(name,data));
       });
       listen('response_start',data=>{
@@ -270,9 +296,13 @@
       welcome.querySelector('p:last-child').textContent='Start with “'+example+'”';
       const currentWelcome=el('messages').querySelector('.welcome p:last-child');
       if(currentWelcome) currentWelcome.textContent=welcome.querySelector('p:last-child').textContent;
-      el('counts').textContent=data.counts.tenants+' tenants · '+data.counts.accounts+' accounts · '+data.counts.relationship_tuples+' relationship tuples\nDemo date: '+data.reference_date;
-      el('starters').replaceChildren();
-      data.scenarios.forEach(item=>{ const button=document.createElement('button'); button.className='starter'; button.textContent=item.name; button.onclick=()=>{el('prompt').value=item.prompt;el('prompt').focus();};el('starters').appendChild(button); });
+      el('counts').textContent=data.counts.tenants+' tenants · '+data.counts.accounts+' accounts · '+data.counts.relationship_tuples+' relationship tuples\n'+data.counts.analytics_rows+' SQL rows · Demo date: '+data.reference_date;
+      el('default-skills').replaceChildren();
+      (data.default_skills || []).forEach(skill=>{
+        const item=document.createElement('p'); item.className='muted'; item.textContent=skill.name;
+        el('default-skills').append(item);
+      });
+      renderScenarios(data);
       renderInboxAccess();
       if(activeView==='inbox') await loadInbox();
     }

@@ -14,6 +14,7 @@ class Element {
   cloneNode() { return new Element(); }
   querySelector(selector) { return selector==='p:last-child' ? (this.paragraph ||= new Element()) : null; }
   setAttribute(key,value) { this.attributes[key]=value; }
+  focus() { this.focused=true; }
   get firstElementChild() { return this.children[0]; }
   get classList() {
     return {
@@ -240,4 +241,109 @@ test('new chat reloads lead eligibility and empty inbox stays actionable',async(
   assert.equal(el('populate-approvals').disabled,false);
   assert.equal(el('inbox-detail').hidden,true);
   assert.match(el('inbox-list').children[0].textContent,/No approvals to review/);
+});
+
+function scenarioCatalog(tenant='northstar') {
+  const name=tenant==='northstar' ? 'Northstar Cloud' : 'Beacon Data';
+  const account=tenant==='northstar' ? 'Meridian Retail' : 'Juniper Manufacturing';
+  return {tenants:[{id:tenant,name,users:[]}],accounts:[],can_review_approvals:false,
+    scenarios:[{id:'renewal-risk',name:'Renewal meeting: open blockers',account,
+      prompt:`Prepare me for ${account}'s renewal meeting. Find the open issues and cite the evidence.`,
+      description:'Tests governed evidence retrieval.',expected:'A cited summary; no records change.'}],
+    counts:{tenants:3,accounts:9,relationship_tuples:171},reference_date:'2026-09-28'};
+}
+
+test('tenant scenarios expose the test and expected result in hover and accessible descriptions',()=>{
+  const {context,el}=fixture(); el('tenant').value='beacon';
+  const data=scenarioCatalog('beacon'); context.renderScenarios(data);
+  assert.equal(el('scenarios-heading').textContent,'Beacon Data scenarios');
+  const [button,description]=el('scenarios').children;
+  assert.equal(button.type,'button');
+  assert.equal(button.children[0].textContent,'Renewal meeting: open blockers');
+  assert.equal(button.children[1].textContent,'Juniper Manufacturing');
+  assert.match(button.title,/Tests governed evidence retrieval/);
+  assert.match(button.title,/Expected: A cited summary; no records change/);
+  assert.equal(button.attributes['aria-describedby'],description.id);
+  assert.equal(button.title,description.textContent);
+});
+
+test('scenario selection only fills and focuses the message without submitting or changing context',()=>{
+  const {context,el,EventSource}=fixture(), data=scenarioCatalog();
+  let calls=0; context.fetch=()=>{calls++;throw new Error('Scenario click must not submit');};
+  const before=EventSource.instances.length;
+  el('tenant').value='northstar'; el('persona').value='user:northstar/csm';
+  el('profile').value='support'; el('mode').value='handoff';
+  context.switchView('inbox'); context.renderScenarios(data);
+  el('scenarios').children[0].onclick();
+  assert.equal(el('prompt').value,data.scenarios[0].prompt);
+  assert.equal(el('prompt').focused,true);
+  assert.equal(el('chat-panel').hidden,false);
+  assert.equal(el('persona').value,'user:northstar/csm');
+  assert.equal(el('profile').value,'support');
+  assert.equal(el('mode').value,'handoff');
+  assert.equal(calls,0);
+  assert.equal(EventSource.instances.length,before);
+  assert.equal(el('messages').children.length,0);
+});
+
+test('scenario text remains literal, including markup in tooltip and prompt',()=>{
+  const {context,el}=fixture(), data=scenarioCatalog();
+  Object.assign(data.scenarios[0],{name:'<img src=x>',description:'<script>not executed</script>',
+    expected:'<b>literal result</b>',prompt:'<script>literal prompt</script>'});
+  context.renderScenarios(data);
+  const [button,description]=el('scenarios').children;
+  assert.equal(button.children[0].textContent,'<img src=x>');
+  assert.equal(description.children.length,0);
+  assert.match(button.title,/<b>literal result<\/b>/);
+  button.onclick();
+  assert.equal(el('prompt').value,'<script>literal prompt</script>');
+});
+
+test('context changes clear old scenarios and ignore a stale catalog response',async()=>{
+  const {context,el}=fixture(), old=scenarioCatalog(), fresh=scenarioCatalog('beacon');
+  el('tenant').value='northstar'; context.renderScenarios(old);
+  el('prompt').value=old.scenarios[0].prompt;
+  const wait=deferred(); context.fetch=()=>wait.promise;
+  const loading=context.refresh(); context.newChat();
+  assert.equal(el('scenarios').children.length,0);
+  assert.equal(el('prompt').value,'');
+  el('tenant').value='beacon'; el('persona').value='user:beacon/csm';
+  context.fetch=async()=>response(fresh); await context.refresh();
+  wait.resolve(response(old)); await loading;
+  assert.equal(el('scenarios-heading').textContent,'Beacon Data scenarios');
+  assert.equal(el('scenarios').children[0].children[1].textContent,'Juniper Manufacturing');
+});
+
+test('skills and SQL events appear in activity without leaking SQL into chat',()=>{
+  const {el,source}=fixture();
+  source.dispatch('skills_discovered',{skill_ids:['sql-analysis']},1);
+  source.dispatch('skill_instructions_loaded',{resource:'skill:northstar/sql-analysis',file_path:'/skills/sql-analysis/SKILL.md'},2);
+  source.dispatch('sql_query_completed',{resource:'account:northstar/AC-100',row_count:2},3);
+  source.dispatch('sql_query_rejected',{reason_code:'unsafe_or_invalid_sql'},4);
+  source.dispatch('tool_rejected',{tool_name:'query_customer_analytics',reason_code:'unsafe_or_invalid_sql'},5);
+  assert.equal(el('activity').children.length,5);
+  assert.equal(el('activity').children[0].className,'event failed');
+  assert.equal(el('messages').children.length,0);
+});
+
+test('mock service failure activity is visible without fabricating an assistant answer',()=>{
+  const {el,source}=fixture();
+  source.dispatch('service_call_started',{mock_service:true},1);
+  source.dispatch('service_call_failed',{reason_code:'service_timeout',mock_service:true},2);
+  source.dispatch('tool_failed',{tool_name:'get_support_sla_report',reason_code:'service_timeout'},3);
+  assert.equal(el('activity').children.length,3);
+  assert.equal(el('activity').children[0].className,'event failed');
+  assert.equal(el('messages').children.length,0);
+});
+
+test('default skills render literal text and clear on context change',async()=>{
+  const {context,el}=fixture(), data=scenarioCatalog();
+  data.default_skills=[{id:'sql-analysis',name:'Scoped SQL analysis'},{id:'test',name:'<b>literal</b>'}];
+  data.counts.analytics_rows=297;
+  context.fetch=async()=>response(data); await context.refresh();
+  assert.deepEqual(el('default-skills').children.map(item=>item.textContent),['Scoped SQL analysis','<b>literal</b>']);
+  assert.equal(el('default-skills').children[1].children.length,0);
+  assert.match(el('counts').textContent,/297 SQL rows/);
+  context.newChat();
+  assert.equal(el('default-skills').children.length,0);
 });

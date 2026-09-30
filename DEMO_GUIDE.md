@@ -3,9 +3,189 @@
 Open http://localhost:8000 and refresh an older open tab.
 
 The demo has 3 fictional tenants, 9 users, 6 teams, 9 accounts, 18 support
-cases, 18 account documents, and 171 relationship tuples. All records and
-permissions are in memory. Restarting the server restores the seed data.
+cases, 18 account documents, 297 analytics rows, and 576 relationship tuples.
+The analytics service executes real SQL in isolated in-memory SQLite databases;
+business fixtures, permissions, and approvals remain in memory. Restarting the
+server restores the seed data.
 Dates are evaluated against **September 28, 2026**, so results remain repeatable.
+
+## Scenario picker
+
+The left sidebar lists scenarios for the selected tenant, using its account and
+lead names. Hover over a scenario to see what it tests and its expected result;
+the same description is associated with the button for screen readers. Clicking
+only fills **Message the assistant** and opens the chat view. It does not submit
+the request, change persona/profile, or approve anything.
+
+Five additional scenarios cover SQL-generated adoption analysis, restricted
+billing, direct incident queries, rejected SQL writes, and analytics-backed briefs
+that require lead approval. **Default agent skills** lists the playbooks available
+to the selected persona/profile; full instructions are read on demand.
+
+Keep **Invocation controls → Chat · model chooses tools** selected. Expectations
+describe the current persona/profile with seeded permissions and update when you
+switch context. For example, **Request Priya Shah's approval** queues a real brief
+proposal when acting as Maya with Customer Operations Assistant, but is denied
+for Jordan or the read-only Support Assistant. The save prompt is self-contained;
+no earlier conversation is required.
+
+Other scenarios cover at-risk and healthy renewals, missing sign-off, restricted
+commercial notes, filtered search, saved-brief verification, archive permissions,
+and cross-tenant denial. Only visible accounts appear in the scenario picker.
+Changing context clears the previous tenant's draft and scenarios before loading
+the new ones. No LangSmith thread-link functionality is added in this update.
+
+## Analytics service and SQL analyst
+
+The original custom LangGraph agent now exposes three analytics tools:
+
+- `get_analytics_schema`: discovers visible tables and columns for one account.
+- `query_customer_analytics`: runs supplied SQL through the read-only service.
+- `analyze_customer_data`: delegates a natural-language question to a two-node
+  specialist, which generates SQL and then executes it under fresh authorization.
+
+There are three fictional tables, with the same schema across all tenants:
+
+| Table | Seed data | Access |
+| --- | --- | --- |
+| `usage_daily` | 28 September snapshots per account; active/licensed seats, API requests, errors | Account readers with dataset grants |
+| `invoices` | July–September invoices; integer USD cents, due date, payment status | Success team and Customer Operations/SQL Analyst only |
+| `service_incidents` | Two account-specific incidents with status and observed impact minutes | Account readers with dataset grants |
+
+Try these in **Northstar Cloud → Maya Chen → Customer Operations Assistant**:
+
+1. “Ask the SQL analyst to compare Meridian Retail's average active seats and API
+   error rates for September 1–14 versus 15–28, 2026. Show the SQL and sources.”
+   Expected: average active seats fall from 820 to 590 and API error rates rise.
+2. “Query Meridian Retail's overdue invoices and report the outstanding amount
+   in dollars.” Expected: USD 24,000 overdue as of the fixed demo date.
+3. “Which unresolved service incidents affected Meridian Retail, and how many
+   impact minutes were recorded?” Expected: two incidents, 47 and 18 minutes.
+4. “Use adoption and incident evidence to draft and save a brief for Meridian
+   Retail.” Expected: authorized evidence, followed by a real approval pause for
+   Priya. Nothing is saved before approval.
+
+Switch to **Jordan Ellis**: incident/usage data for Meridian remains available,
+but invoice access is denied, including through the more privileged SQL Analyst.
+Switch to **Support Assistant**: direct operational SQL works, but SQL specialist
+delegation is denied even when the user is Maya. Other tenants' cards use their
+own account and lead names; healthy and incomplete accounts have different data.
+
+For a direct query, ask the assistant to call `query_customer_analytics` for
+Meridian Retail, dataset `usage_daily`, with:
+
+```sql
+SELECT usage_date, active_seats, licensed_seats,
+       ROUND(error_requests * 100.0 / NULLIF(api_requests, 0), 2) AS error_pct
+FROM usage_daily
+ORDER BY usage_date
+```
+
+The account scope is enforced **before SQL execution**, not by adding a model-
+generated `WHERE tenant_id` clause. Each connection contains only the selected
+account's authorized, explicitly requested datasets. Hidden tables are not copied.
+Both user and agent need account/dataset access, the agent needs tool execution
+permission, and delegation requires a separate parent-to-child grant. Child
+reads also recheck the parent permissions; generation does not freeze access.
+
+The SQLite authorizer blocks writes, schema introspection, PRAGMA, ATTACH,
+extensions, file functions, and recursive queries. One statement, an allowlist
+of SQL functions, compile/VM limits, a 100-row cap, and a 32 KB result budget keep
+execution bounded. Results include executed SQL, sources, date, and truncation.
+Invalid/unsafe queries return a generic error, not raw SQLite details. This is a
+local demo sandbox, not a production database security architecture. No SQL write
+approval exists; writes continue to use the existing reviewed brief tools.
+
+## Read-only mock services and a balanced trace batch
+
+Five additional named tools are available through the ordinary main agent. These
+are local functions with fictional fixtures, not network endpoints or MCP servers.
+All calls check tenant membership, account access, tool execution permission, and
+both user/agent reader grants on `service:<tenant>/<service>` before any result
+or simulated upstream failure. They never modify accounts or contact real systems.
+
+| Tool | Successful fixture | Unsuccessful fixture |
+| --- | --- | --- |
+| `get_billing_snapshot` | CSM, AC-101: billing balances | Support persona, AC-100: service reader denied |
+| `get_support_sla_report` | CSM, AC-101: SLA metrics | CSM, AC-100: simulated timeout |
+| `get_crm_sync_status` | CSM, AC-101: current sync status | CSM, AC-100: simulated unavailable service |
+| `get_usage_export_status` | CSM, AC-101: ready export manifest | CSM, AC-100: simulated invalid upstream response |
+| `get_renewal_forecast` | CSM, AC-101: precomputed fictional forecast | Support persona, AC-100: service reader denied |
+
+These fixtures apply independently in all three tenants. Service lifecycle events
+carry `mock_service=true`. Faults are fixed server-owned fixtures, not a prompt or
+tool argument that enables arbitrary failure injection. Expected service failures
+return a bounded error code to the assistant; unknown execution exceptions still
+propagate to the existing run-error handler after their tool span is tagged.
+
+For example, as Maya: “Call get_support_sla_report once for Meridian Retail and
+report its actual result or error. Do not retry.” The same request for Westhaven
+Energy succeeds. Billing/forecast failure cases use the Support **persona**, with
+the Customer Operations **assistant profile**, to demonstrate independent user
+and agent permissions.
+
+Generate exactly 50 new traces through `/api/run` and `/api/stream`, using the real
+model and standard main-agent routing:
+
+`python run_tool_trace_batch.py --output trace_batches/my-new-batch.jsonl`
+
+The matrix repeats each tool's success and failure case five times, rotating
+tenants: 25 successes, 15 simulated service failures, and 10 authorization denials.
+Concurrency defaults to three. No HTTP POST/turn retries or replacement traces
+are generated; deviations fail the batch instead of silently manufacturing a
+50/50 result. Run IDs are recorded immediately after acceptance in an exclusively
+created JSONL manifest. A model refusal without invoking the tool fails verification.
+
+Verify existing traces, without generating any more:
+
+`python run_tool_trace_batch.py --verify-only trace_batches/my-new-batch.jsonl`
+
+The verifier reads those 50 IDs from LangSmith and checks persisted root/tool tags,
+categories, and counts, writing a separate `.verified.json` report. Filter by the
+manifest's `sample_batch_id` metadata or `batch:<batch-id>` tag. `sample_case_id`
+identifies each case. These bounded request labels are observability only and
+never influence tool selection, authorization, or failure behavior.
+
+## Default runtime skills
+
+The main agent uses **Deep Agents `SkillsMiddleware`** (`deepagents==0.7.20`) for
+three trusted, version-controlled playbooks: **Evidence-backed account briefing**,
+**Scoped SQL analysis**, and **Human-reviewed account changes**. Their files live
+under `agent_skills/`, with standard `name` and `description` YAML frontmatter.
+
+The existing LangGraph explicitly invokes the middleware's public lifecycle hooks:
+
+1. `abefore_agent` discovers authorized skills and parses their frontmatter.
+2. `awrap_model_call` appends skill summaries and virtual paths to the system
+   message. Full instructions are **not** eagerly injected.
+3. When applicable, the model calls `read_file` for the listed `SKILL.md`. A fresh
+   authorization transaction precedes returning instructions as a tool result.
+
+This integrates the native middleware, not the full `create_deep_agent` stack.
+Existing routing, approval checkpoints, tool governance, and streaming remain in
+place. No shell, filesystem writes, arbitrary file reads, or installer is enabled.
+The SQL specialist retains its own task-specific prompt and does not automatically
+inherit the parent's skills.
+
+Each middleware invocation gets a read-only backend scoped to its trusted actor.
+It accepts only `/skills/account-briefing/SKILL.md`,
+`/skills/sql-analysis/SKILL.md`, and `/skills/approval-workflow/SKILL.md`.
+Model-provided paths are exact registry lookups, never OS paths or URLs. Discovery
+requires `skill:<tenant>/<name>` reader grants for both user and assistant, plus
+the assistant's `load_agent_skills` executor grant. Full reads recheck those grants
+and additionally require the assistant's `read_file` executor grant.
+
+Metadata is refreshed **before each main model call**, rather than using the SDK's
+usual once-per-thread discovery cache. Revoked skills disappear from the next
+summary and new reads are denied; instructions already in conversation history
+cannot be retroactively erased. Skills guide behavior but never grant tool/data
+access. SQL and write checks remain active even if a playbook is absent. Bundled
+files are cached when the store starts; restart the server after editing them.
+
+Try: “Read the sql-analysis skill instructions, then explain how you handle invoice
+amounts and daily active seats. Do not run a query or save anything.” Expect
+`skills_discovered`, a governed `read_file`, then `skill_instructions_loaded` and
+a streamed explanation about integer cents and averaging seat snapshots.
 
 ## Start with a complete conversation
 
@@ -108,16 +288,28 @@ and follow-ups.
 
 ## Traces and test runners
 
+Start with [README.md](README.md) for portable setup and the supported
+`generate_traces.py` command. For example:
+
+```sh
+python generate_traces.py --count 100 --include-hitl --dry-run
+python generate_traces.py --count 100 --include-hitl --verify
+```
+
+This uses the normal model-routed `/api/run` entry point. HITL decisions require
+the explicit flag; counts include request, review, and resume roots. The older
+fixed-matrix commands below remain available for specialized experiments.
+
 The right-hand activity feed displays real execution events. Expand an FGA check
 to see the tenant, initiating user, acting agent, resource, call ID, and matching
 membership/grant path. Failures, access denials, and review decisions have
 distinct events.
 
-With the existing tracing configuration, runs appear in LangSmith's
-**auth-guardrail** project as **customer_operations.turn**, tagged
+With tracing enabled, runs appear in the configured `LANGSMITH_PROJECT`
+as **customer_operations.turn**, tagged
 **customer-operations**, **tenant-governance**, and **tool** or **handoff**.
 The specialist graph is named **renewal_analyst.assess_account**.
-New runs carry `trace_schema_version=4`; older traces are
+New runs carry `trace_schema_version=9`; older traces are
 unchanged. Update saved run-name filters if they target the old root name.
 
 ### Trace naming and authorization middleware
@@ -172,7 +364,7 @@ it never substitutes for the tool's operation-specific authorization. Explicit
 handoff checks the selected account rather than interpreting the message text.
 
 Open **authorization.authorize_transaction** to see the actual authorization
-scope (`request`, `tool`, or `approval`), phase, decision, and FGA events with matching grant
+scope (`request`, `tool`, `skill`, or `approval`), phase, decision, and FGA events with matching grant
 paths. Tenant-membership events are nested under **authorization.verify_tenant**.
 This middleware finishes
 before the operation consumes its authorized scope. It covers account reads,
@@ -186,6 +378,60 @@ Seeded approval traces use `customer_operations.prepare_demo_approval` and
 `approval_demo=true` metadata. The decision run includes `reviewed_approval_id`;
 reviewer checks use `auth_scope=approval`. Inbox polling enforces the same FGA
 policy without creating repetitive traces for each refresh.
+
+SQL traces add `tools.analyze_customer_data` → `sql_analyst.analyze_account` →
+`sql_analyst.generate_query` / `sql_analyst.execute_query`. The model call is
+`sql_analyst.generate_sql_statement`; actual database execution is
+`analytics.execute_read_only_query`, with nested authorization middleware.
+Direct SQL uses `tools.query_customer_analytics` and the same execution boundary.
+Skills appear under `skills.discover_metadata` and `skills.apply_model_middleware`;
+the latter contains `customer_operations.generate_response`. On-demand reads use
+`tools.read_file` → `skills.read_instructions` →
+`authorization.authorize_transaction` → `authorization.verify_tenant`.
+Skill authorization has `auth_scope=skill` and `auth_phase=discover` or `read`.
+The activity feed distinguishes `skills_discovered` from
+`skill_instructions_loaded`, alongside SQL completion/rejection events.
+Internal SQL-generation tokens are never streamed into the assistant chat bubble;
+the main assistant's explanation still streams normally.
+
+### Finding failed or rejected tool calls in LangSmith
+
+For whole traces, filter the root **customer_operations.turn** runs by the tag
+`contains-tool-rejection`. To inspect individual rejected calls, include child
+runs and filter by `tool-rejected`. These existing tags now serve as shared
+**unsuccessful-tool** filters, covering failures as well as policy rejections.
+Use the category tags to distinguish the causes:
+
+- `rejection-authorization`: FGA or delegation denial.
+- `rejection-sql-validation`: unsafe/invalid SQL or rejected analyst output.
+- `rejection-input-validation`: malformed arguments or invalid read windows.
+- `rejection-approval`: human review rejection or stale approval.
+- `rejection-execution`: mock-service faults or unexpected tool exceptions.
+
+Execution failures additionally have `tool-failed` on the tool span and
+`contains-tool-failure` on the root, with `failure-execution` on both. Multiple
+category tags can occur on one root when different calls fail for different reasons.
+
+The rejected tool span carries `tool_name`, `call_id`, `reason_code`, and
+`rejection_category` metadata. The root carries `rejected_tool_call_count`,
+`rejected_tools`, `rejection_categories`, and a `tool_rejections` summary (first
+100 calls; `rejection_details_truncated` indicates additional calls). Summaries
+exclude SQL, arguments, record contents, and exception text. Repeated events for
+one tool span count once. Existing `fga-deny` tags remain on authorization spans.
+
+Tags are recorded from actual execution events, not model prose. A root tag means
+the turn **contained** an unsuccessful tool call, not that the final response failed.
+Existing error statuses are unchanged. Successful sibling calls and later turns
+do not inherit rejection tags. Pending human review and cancellation are not
+failures. Request-gate denials before a tool invocation, filtered-out skills/records,
+and invented tool names with no actual registered tool span are excluded.
+JSON argument schemas remain unchanged for models; Pydantic validation runs
+inside the traced tool coroutine so invalid arguments receive outcome tags too.
+No historical runs are backfilled. These tags persist with normal trace completion;
+they do not require a separate LangSmith update request.
+
+Try `sql-adoption` (successful, untagged) and `sql-billing-denied` (tagged as
+authorization rejection) using the live sample runner below.
 
 ### Streaming responses
 
@@ -205,29 +451,101 @@ responses continue to stream normally.
 
 Offline verification:
 
-`LANGSMITH_TRACING=false LANGCHAIN_TRACING_V2=false /private/tmp/mcp-dev-venv/bin/python -m unittest -v test_approval_inbox test_customer_operations test_customer_observability test_agent_to_agent`
+`LANGSMITH_TRACING=false LANGCHAIN_TRACING_V2=false python -m unittest discover -p 'test_*.py'`
 
 Frontend streaming, replay, and inbox tests: `node --test test_chat_stream.cjs`.
 
 Live samples through the same HTTP/main-agent path as the UI:
 
-`/private/tmp/mcp-dev-venv/bin/python run_customer_samples.py`
+`python run_customer_samples.py`
 
 To reproduce the no-tool authorization cases:
 
-`/private/tmp/mcp-dev-venv/bin/python run_customer_samples.py --case wrong-tenant-name --case greeting`
+`python run_customer_samples.py --case wrong-tenant-name --case greeting`
 
 The runner reports event counts and first/last text timing, and requires text
 deltas for model-driven samples.
 
+Native skill discovery and on-demand reading through the main agent:
+
+`python run_customer_samples.py --case skill-loading`
+
+SQL samples through the same HTTP/main-agent path (no database changes):
+
+`python run_customer_samples.py --case sql-adoption --case sql-incidents --case sql-billing-denied --case sql-delegation-denied`
+
 The live workflow sample also approves a fictional brief in Beacon Data:
 
-`/private/tmp/mcp-dev-venv/bin/python run_customer_samples.py --case workflow --include-write`
+`python run_customer_samples.py --case workflow --include-write`
 
-Server startup in the prepared local environment:
+Server startup in your activated virtual environment:
 
-`/private/tmp/mcp-dev-venv/bin/python server.py`
+`python server.py`
 
 The served implementation is in `customer_store.py`, `customer_auth.py`,
 `customer_agent.py`, `approval_inbox.py`, and `server.py`. Earlier generic-summary scripts remain as legacy regression demos.
-SQL persistence and mock MCP services are still future phases.
+`customer_analytics.py` and `customer_skills.py` provide the new local services.
+Persistent SQL storage and protocol-level mock MCP servers remain future phases.
+
+## Native SubAgentMiddleware specialists
+
+The existing renewal and SQL analysts remain available. Three additional agents
+use Deep Agents' actual `SubAgentMiddleware` and isolated model/tool loops:
+
+| Agent | Tools and limits |
+|---|---|
+| `billing-review` | Account facts, billing snapshot, usage-export status; read-only |
+| `support-escalation` | Account facts, visible cases, SLA report; recommendations only |
+| `renewal-planning` | Account facts, visible cases, forecast, CRM status; saving a brief requires lead approval |
+
+The parent invokes `task(description, subagent_type)`. Include exactly one
+account reference in the description. Neither identity fields nor recursive
+delegation are exposed. Each child tool is constrained to that account and the
+intersection of user, parent and child permissions. Both user and parent need
+FGA `delegate` grants; child model/tool calls recheck them, including on resume.
+An omitted `account:` prefix is normalized only if the remaining tenant/account
+identifier exactly matches the server-authorized delegated account. Other
+accounts and foreign tenant references remain denied.
+Support personas/assistants can delegate to support-escalation, but not billing
+review or renewal planning. Customer-success personas using Customer Operations
+can delegate to all three.
+
+Try the new left-side scenarios, or ask:
+
+- "Delegate to billing-review using task. For Westhaven Energy, call get_billing_snapshot once and report the balances."
+- "Delegate to support-escalation using task. For Meridian Retail, call get_support_sla_report once and report its actual result or error without retrying."
+- "Delegate to renewal-planning using task. Save a brief for Westhaven Energy: confirm the renewal meeting agenda and success criteria. Submit it for lead review."
+
+Select Jordan + Customer Operations for a user-delegation denial; select Maya +
+Support Assistant for a parent-delegation denial when requesting billing or renewal.
+
+Spans include `tools.task.<specialist>`, the named native child agent, and the
+actual child tool name. Leaf tags remain `tool-rejected` / `rejection-<category>`;
+execution failures also carry `tool-failed` / `failure-execution`. Owning task
+and child-agent spans carry `subagent-rejected` and aggregate rejection tags;
+execution failures additionally carry `subagent-failed`. Parent roots retain
+`contains-tool-rejection` / `contains-tool-failure` and add
+`contains-subagent-rejection`. An aggregate does not inflate rejected-tool counts.
+Waiting for approval, approved writes, and conditional holds are not failures;
+human denial uses `rejection-approval`.
+
+Generate 20 real main-entrypoint examples (8 successes, 6 delegation denials,
+3 mock child service failures, 3 HITL outcomes):
+
+```sh
+python run_subagent_samples.py --output trace_batches/native-example.jsonl
+python run_subagent_samples.py --verify-only trace_batches/native-example.jsonl
+```
+
+For an explicit follow-up subset, supply repeated case numbers, for example
+`--case 06 --case 07 --case 08`. This creates a separate, labeled batch; it does
+not overwrite or silently replace earlier results. Verification reports both
+actual persisted tags and whether the intended scenario outcome passed.
+
+The runner approves one fictional brief, denies one and holds one. It reuses a
+single session, never retries POSTs, and records accepted run IDs immediately.
+Twenty examples produce 26 root traces:20 requests,3 review-authorizations and
+3 resumes. Initial/resumed runs share conversation IDs and batch labels. The
+read-only verification report also records the three review roots by exact
+proposal ID. Use a new output path for each batch; existing artifacts are never
+overwritten. Offline tests: `python -m unittest -q test_customer_subagents`.

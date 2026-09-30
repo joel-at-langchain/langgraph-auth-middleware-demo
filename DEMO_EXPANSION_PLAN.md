@@ -4,7 +4,36 @@ Date: 2026-09-28
 Status: first in-memory release implemented on 2026-09-28. See DEMO_GUIDE.md for
 the running workflow and exploration queries. The served application now uses
 customer_store.py, customer_agent.py, and server.py; the original generic-summary
-scripts remain as legacy regression demos. SQL and MCP services remain future work.
+scripts remain as legacy regression demos.
+
+September 29 expansion: implemented a local SQLite analytics service (usage,
+invoices, service incidents), a two-node SQL-generation/execution specialist,
+dataset-level FGA checks, and three default runtime playbooks. The database is
+an ephemeral authorized projection of fixtures, not persistent shared storage.
+Added direct-query/delegation/denial/approval UI scenarios and security regression
+tests. Kept the existing LangGraph framework and streaming/approval paths; that
+SQL phase required no new dependencies. See DEMO_GUIDE.md for the current behavior. Persistent SQL and
+protocol-level mock MCP services remain future phases. The original phase-one
+plan below is retained as historical context.
+
+September 29 middleware update: replaced eager skill-body injection with native
+Deep Agents `SkillsMiddleware` discovery and model hooks, using the approved
+`deepagents==0.7.20` dependency and compatible LangChain/LangGraph updates. The
+main graph, interrupts, approvals, and streaming remain intact. An invocation-local,
+FGA-filtered read-only backend exposes only three fixed virtual skill paths.
+Metadata refreshes before each model call; full instructions require a governed
+`read_file` call with fresh reader and executor checks. Added progressive-loading,
+revocation, concurrency, trace, and streaming tests plus a live skill-loading sample.
+No shell tools, filesystem writes, or full `create_deep_agent` stack are enabled.
+
+September 29 outcome-coverage update: added five read-only mock service tools
+for billing, support SLA, CRM sync, usage-export status, and renewal forecasts.
+They use fresh tenant/account/service/executor authorization and fixed fictional
+fault fixtures. Shared outcome tagging now covers execution errors, input
+validation, and rejected reviews as well as FGA/SQL denials, without tagging
+pending reviews. A real-model HTTP runner records exactly 50 accepted turns in
+a manifest and separately verifies a 25/25 outcome split in LangSmith. No fake
+trace records, protocol-level MCP servers, or new dependencies were added.
 
 ## Direction
 

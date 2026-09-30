@@ -9,6 +9,9 @@ from collections import deque
 import httpx
 import langsmith as ls
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.language_models import BaseChatModel
+from pydantic import ConfigDict, Field
+from typing import Any
 from langgraph.types import Command
 
 from customer_agent import build_customer_graph, stream_turn
@@ -20,14 +23,25 @@ ACCOUNT = "account:northstar/AC-100"
 NOTE = "document:northstar/100-commercial"
 
 
-class ScriptedCustomerModel:
+class ScriptedCustomerModel(BaseChatModel):
     """Script only model choices. All policy, tools, graph, and stores are real."""
 
-    def __init__(self, *batches):
-        self.batches = deque(batches)
-        self.seen = []
+    model_config = ConfigDict(extra="allow")
+    batches: Any
+    seen: list = Field(default_factory=list)
+    tools: Any = None
 
-    def bind_tools(self, tools):
+    def __init__(self, *batches):
+        super().__init__(batches=deque(batches))
+
+    @property
+    def _llm_type(self):
+        return "offline-scripted-customer-model"
+
+    def _generate(self, *args, **kwargs):
+        raise AssertionError("Use the offline async model")
+
+    def bind_tools(self, tools, **kwargs):
         self.tools = tools
         return self
 

@@ -9,11 +9,16 @@ from typing import Callable
 
 from fga_store import FGAStore
 from customer_auth import CustomerAuthorizationMiddleware
+from customer_analytics import ANALYTICS_TOOLS, SCHEMAS, CustomerAnalytics, dataset_id
+from customer_skills import SKILLS, DefaultSkills
+from customer_services import SERVICE_TOOLS, CustomerServices
+from customer_subagents import SUBAGENTS
 
 REFERENCE_DATE = date(2026, 9, 28)
 TOOLS = (
     "get_customer_account", "search_account_records", "save_account_brief",
     "archive_account_brief", "assess_renewal_readiness",
+    *ANALYTICS_TOOLS, "load_agent_skills", "read_file", *SERVICE_TOOLS, "task",
 )
 TENANTS = (
     ("northstar", "Northstar Cloud", "Managed infrastructure",
@@ -60,6 +65,9 @@ class CustomerStore:
         self.completed_writes = {}
         self._seed()
         self.authorization = CustomerAuthorizationMiddleware(self)
+        self.analytics = CustomerAnalytics(self)
+        self.skills = DefaultSkills(self)
+        self.services = CustomerServices(self)
 
     def _seed(self):
         fga = self.fga
@@ -78,14 +86,39 @@ class CustomerStore:
             ops, support_agent, specialist = (
                 f"agent:{tenant}/{profile}" for profile in ("customer-ops", "support", "renewal-analyst")
             )
-            for agent in (ops, support_agent, specialist):
+            sql_agent = f"agent:{tenant}/sql-analyst"
+            for agent in (ops, support_agent, specialist, sql_agent):
                 fga.write_tuple(agent, "member", tenant_object)
                 capabilities = TOOLS if agent == ops else TOOLS[:2]
                 if agent == support_agent:
-                    capabilities = (*TOOLS[:2], "assess_renewal_readiness")
+                    capabilities = (*TOOLS[:2], "assess_renewal_readiness", *ANALYTICS_TOOLS, "load_agent_skills", "read_file", *SERVICE_TOOLS, "task")
+                elif agent == sql_agent:
+                    capabilities = ANALYTICS_TOOLS[:2]
                 for capability in capabilities:
                     fga.write_tuple(agent, "executor", f"tool:{tenant}/{capability}")
             fga.write_tuple(ops, "delegate", specialist)
+            fga.write_tuple(ops, "delegate", sql_agent)
+            for subagent, spec in SUBAGENTS.items():
+                child = f"agent:{tenant}/{subagent}"
+                fga.write_tuple(child, "member", tenant_object)
+                fga.write_tuple(ops, "delegate", child)
+                fga.write_tuple(f"{cs_team}#member", "delegate", child)
+                if subagent == "support-escalation":
+                    fga.write_tuple(support_agent, "delegate", child)
+                    fga.write_tuple(f"{support_team}#member", "delegate", child)
+                for operation in spec["tools"]:
+                    fga.write_tuple(child, "executor", f"tool:{tenant}/{operation}")
+                for service_name in spec["services"]:
+                    fga.write_tuple(child, "reader", f"service:{tenant}/{service_name}")
+            for service in SERVICE_TOOLS.values():
+                subjects = [f"{cs_team}#member", ops]
+                if not service["restricted"]:
+                    subjects.extend([f"{support_team}#member", support_agent])
+                for subject in subjects:
+                    fga.write_tuple(subject, "reader", f"service:{tenant}/{service['service']}")
+            for skill in SKILLS:
+                for subject in (f"{cs_team}#member", f"{support_team}#member", ops, support_agent):
+                    fga.write_tuple(subject, "reader", f"skill:{tenant}/{skill}")
             for index, customer in enumerate(customers):
                 aid = f"account:{tenant}/AC-{index + 100}"
                 status = ("attention", "healthy", "incomplete")[index]
@@ -102,8 +135,17 @@ class CustomerStore:
                 if index == 0:
                     fga.write_tuple(f"{support_team}#member", "reader", aid)
                 fga.write_tuple(ops, "admin", aid)
-                for agent in (support_agent, specialist):
+                for subagent in SUBAGENTS:
+                    fga.write_tuple(f"agent:{tenant}/{subagent}",
+                                    "writer" if subagent == "renewal-planning" else "reader", aid)
+                for agent in (support_agent, specialist, sql_agent):
                     fga.write_tuple(agent, "reader", aid)
+                for dataset in SCHEMAS:
+                    subjects = [f"{cs_team}#member", ops, sql_agent]
+                    if dataset != "invoices":
+                        subjects.extend([f"{support_team}#member", support_agent])
+                    for subject in subjects:
+                        fga.write_tuple(subject, "reader", dataset_id(aid, dataset))
                 cases = (
                     ("Intermittent SSO login failures", "critical", "open",
                      "SSO login failures affect the rollout. The workaround is temporary; engineering has not confirmed a fix date."),
@@ -147,6 +189,7 @@ class CustomerStore:
                 # access alone must not expose that information through a summary.
                 for subject in (f"{cs_team}#member", ops, specialist):
                     fga.write_tuple(subject, "reader", self.briefs[aid]["id"])
+                fga.write_tuple(f"agent:{tenant}/renewal-planning", "reader", self.briefs[aid]["id"])
 
     def actor(self, tenant_id, user_id, profile="customer-ops") -> Actor:
         if tenant_id not in self.tenants or profile not in {"customer-ops", "support"}:
@@ -239,6 +282,7 @@ class CustomerStore:
                          {"id": "support", "name": "Support Assistant · read only"}],
             "counts": {"tenants": len(self.tenants), "users": len(self.users), "teams": 6,
                        "accounts": len(self.accounts), "records": len(self.records),
+                       "analytics_rows": self.analytics.row_count, "analytics_datasets": len(SCHEMAS),
                        "relationship_tuples": len(self.fga.list_tuples())},
         }
 

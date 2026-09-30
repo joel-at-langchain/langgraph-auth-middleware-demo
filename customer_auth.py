@@ -4,7 +4,7 @@ Scopes are evaluated immediately before use, never cached in graph state. Only
 authorized identifiers leave this boundary; customer content is not trace input.
 """
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import re
 
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -132,7 +132,7 @@ class CustomerAuthorizationMiddleware:
         return self._transaction(actor, request, evaluate, emit, config, scope="approval")
 
     def authorize(self, actor, operation, reference, *, record_id=None,
-                  reviewer=None, phase="invoke", emit=None, config=None):
+                  reviewer=None, phase="invoke", datasets=None, emit=None, config=None):
         request = {
             "actor": asdict(actor), "operation": operation, "resource": reference,
             "phase": phase,
@@ -141,10 +141,104 @@ class CustomerAuthorizationMiddleware:
             request["record_id"] = record_id
         if reviewer is not None:
             request["reviewer"] = reviewer
+        if datasets is not None:
+            request["datasets"] = datasets
 
         return self._transaction(actor, request,
-                                 lambda _config: self._evaluate(actor, operation, reference, record_id, reviewer, phase, emit),
+                                 lambda _config: self._evaluate(actor, operation, reference, record_id, reviewer, phase, emit, datasets),
                                  emit, config, scope="tool")
+
+    def authorize_subagent(self, parent, subagent_type, reference, *, emit=None, config=None):
+        from customer_store import AccessDenied
+        from customer_subagents import SUBAGENTS
+
+        def evaluate(child_config):
+            if subagent_type not in SUBAGENTS or parent.parent_agent_id:
+                raise AccessDenied("subagent_not_allowed")
+            child_id = f"agent:{parent.tenant_id}/{subagent_type}"
+            self._check_delegation(parent, child_id, emit)
+            grant = self.store.fga.check(parent.user_id, "delegate", child_id)
+            if emit:
+                emit("fga_check", resource=child_id, relation="delegate", checks=[{
+                    "subject": parent.user_id, "relation": "delegate", "object": child_id,
+                    "allowed": grant.allowed, "grant_path": [asdict(t) for t in grant.grant_path],
+                }])
+                emit("fga_decision", resource=child_id, relation="delegate",
+                     decision="allow" if grant.allowed else "deny",
+                     reason_code="granted" if grant.allowed else "user_delegation_not_granted")
+            if not grant.allowed:
+                raise AccessDenied("user_delegation_not_granted")
+            account = self.store.account(parent, reference, "reader", "task", emit)
+            child = replace(parent, agent_id=child_id, parent_agent_id=parent.agent_id)
+            self.verify_tenant(child, emit=emit, config=child_config)
+            self.store.check(child, account["id"], "reader", "get_customer_account", emit)
+            return {"account_id": account["id"], "child_agent_id": child_id}
+
+        return self._transaction(parent, {"actor": asdict(parent), "operation": "task",
+            "resource": reference, "phase": "delegate", "subagent_type": subagent_type},
+            evaluate, emit, config, scope="subagent")
+
+    def authorize_child_tool(self, child, operation, args, *, emit=None, config=None):
+        from customer_store import AccessDenied
+        from customer_subagents import SUBAGENTS
+
+        context = config["configurable"]
+        kind = context["subagent_type"]
+        parent = replace(child, agent_id=child.parent_agent_id, parent_agent_id=None)
+        scope = self.authorize_subagent(parent, kind, context["delegated_account_id"], emit=emit, config=config)
+        if child.agent_id != scope["child_agent_id"] or operation not in SUBAGENTS[kind]["tools"]:
+            raise AccessDenied("subagent_tool_not_allowed")
+        reference = args["account_id"].strip()
+        # Normalize only a shorthand for the exact server-authorized account.
+        # This does not create a general alias or allow a different tenant/ID.
+        if reference.casefold() == scope["account_id"].removeprefix("account:").casefold():
+            reference = scope["account_id"]
+        requested = self.store.resolve_account(child, reference)
+        if requested["id"] != scope["account_id"]:
+            raise AccessDenied("subagent_scope_mismatch")
+        # The child cannot lend its capabilities to a less privileged parent.
+        return self.authorize(parent, operation, requested["id"], record_id=args.get("record_id"),
+                              emit=emit, config=config)
+
+    def authorize_skills(self, actor, *, emit=None, config=None):
+        from customer_skills import SKILLS
+        from customer_store import AccessDenied
+
+        def evaluate(_config):
+            visible = []
+            for key in SKILLS:
+                resource = f"skill:{actor.tenant_id}/{key}"
+                try:
+                    self.store.check(actor, resource, "reader", "load_agent_skills", emit)
+                except AccessDenied:
+                    continue
+                visible.append(key)
+            return {"skills": visible}
+
+        return self._transaction(actor, {"operation": "load_agent_skills", "phase": "discover",
+                                        "resource": f"tenant:{actor.tenant_id}"},
+                                 evaluate, emit, config, scope="skill")
+
+    def authorize_skill_file(self, actor, file_path, *, operation, emit=None, config=None):
+        from customer_skills import SKILL_FILES
+        from customer_store import AccessDenied
+
+        key = SKILL_FILES.get(file_path)
+        resource = f"skill:{actor.tenant_id}/{key}" if key else file_path
+
+        def evaluate(_config):
+            if key is None or operation not in {"load_agent_skills", "read_file"}:
+                raise AccessDenied()
+            # Revoking the loader grant also blocks reads of previously known
+            # paths; read_file requires an additional executor grant of its own.
+            self.store.check(actor, resource, "reader", "load_agent_skills", emit)
+            if operation == "read_file":
+                self.store.check(actor, resource, "reader", operation, emit)
+            return {"skill_id": key, "file_path": file_path}
+
+        return self._transaction(actor, {"actor": asdict(actor), "operation": operation,
+                                        "resource": resource, "phase": "read" if operation == "read_file" else "discover"},
+                                 evaluate, emit, config, scope="skill")
 
     def _transaction(self, actor, request, evaluate, emit, config, *, scope):
         # Import here to keep the store's public Actor/AccessDenied API stable.
@@ -174,8 +268,10 @@ class CustomerAuthorizationMiddleware:
             raise AccessDenied(result["reason_code"])
         return result
 
-    def _evaluate(self, actor, operation, reference, record_id, reviewer, phase, emit):
+    def _evaluate(self, actor, operation, reference, record_id, reviewer, phase, emit, datasets=None):
         from customer_store import AccessDenied, TOOLS
+        from customer_analytics import ANALYTICS_TOOLS, SCHEMAS, dataset_id
+        from customer_services import SERVICE_TOOLS
 
         if operation not in TOOLS or phase not in {"invoke", "resume"}:
             raise AccessDenied("invalid_operation")
@@ -183,6 +279,47 @@ class CustomerAuthorizationMiddleware:
                     "writer" if operation == "save_account_brief" else "reader")
         account = self.store.account(actor, reference, relation, operation, emit)
         scope = {"account_id": account["id"]}
+
+        if operation in SERVICE_TOOLS:
+            if phase != "invoke":
+                raise AccessDenied("invalid_operation")
+            resource = f"service:{actor.tenant_id}/{SERVICE_TOOLS[operation]['service']}"
+            self.store.check(actor, resource, "reader", operation, emit)
+            return {**scope, "service_id": resource}
+
+        if operation in ANALYTICS_TOOLS:
+            if phase != "invoke":
+                raise AccessDenied("invalid_operation")
+            # Schema discovery can filter. Explicit dataset requests must fail
+            # closed rather than silently answering only part of a question.
+            if datasets is None and operation != "get_analytics_schema":
+                raise AccessDenied("invalid_operation")
+            if datasets is not None and (not isinstance(datasets, list) or not 1 <= len(datasets) <= 3
+                                         or any(not isinstance(name, str) or name not in SCHEMAS for name in datasets)):
+                raise AccessDenied("invalid_operation")
+            subjects = [actor]
+            if actor.parent_agent_id:
+                parent = replace(actor, agent_id=actor.parent_agent_id, parent_agent_id=None)
+                self.store.account(parent, account["id"], "reader", operation, emit)
+                self._check_delegation(parent, actor.agent_id, emit)
+                subjects.append(parent)
+            allowed = []
+            for name in dict.fromkeys(datasets if datasets is not None else SCHEMAS):
+                try:
+                    for subject in subjects:
+                        self.store.check(subject, dataset_id(account["id"], name), "reader", operation,
+                                         emit if datasets is not None else None)
+                except AccessDenied:
+                    if datasets is not None:
+                        raise
+                    continue
+                allowed.append(name)
+            scope["datasets"] = allowed
+            if operation == "analyze_customer_data":
+                specialist = f"agent:{actor.tenant_id}/sql-analyst"
+                self._check_delegation(actor, specialist, emit)
+                scope["child_agent_id"] = specialist
+            return scope
 
         if phase == "resume":
             if operation not in {"save_account_brief", "archive_account_brief"}:
@@ -223,17 +360,22 @@ class CustomerAuthorizationMiddleware:
 
         elif operation == "assess_renewal_readiness":
             specialist = f"agent:{actor.tenant_id}/renewal-analyst"
-            result = self.store.fga.check(actor.agent_id, "delegate", specialist)
-            if emit:
-                emit("fga_check", resource=specialist, relation="delegate", checks=[{
-                    "subject": actor.agent_id, "relation": "delegate", "object": specialist,
-                    "allowed": result.allowed, "grant_path": [asdict(grant) for grant in result.grant_path],
-                }])
-                emit("fga_decision", resource=specialist, relation="delegate",
-                     decision="allow" if result.allowed else "deny",
-                     reason_code="granted" if result.allowed else "delegation_not_granted")
-            if not result.allowed:
-                raise AccessDenied("delegation_not_granted")
+            self._check_delegation(actor, specialist, emit)
             scope["child_agent_id"] = specialist
 
         return scope
+
+    def _check_delegation(self, actor, specialist, emit):
+        from customer_store import AccessDenied
+
+        result = self.store.fga.check(actor.agent_id, "delegate", specialist)
+        if emit:
+            emit("fga_check", resource=specialist, relation="delegate", checks=[{
+                "subject": actor.agent_id, "relation": "delegate", "object": specialist,
+                "allowed": result.allowed, "grant_path": [asdict(grant) for grant in result.grant_path],
+            }])
+            emit("fga_decision", resource=specialist, relation="delegate",
+                 decision="allow" if result.allowed else "deny",
+                 reason_code="granted" if result.allowed else "delegation_not_granted")
+        if not result.allowed:
+            raise AccessDenied("delegation_not_granted")
