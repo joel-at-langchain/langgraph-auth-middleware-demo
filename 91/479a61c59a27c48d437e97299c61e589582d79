@@ -1,0 +1,80 @@
+DEMO_EXPANSION_PLAN.md
+  s_446424daedca15::t_9c02ce8d71244e 7-36
+SUBAGENT_PLAN.md
+  s_446424daedca15::t_e5a7b49db3d651 1-39
+agent_skills/account-briefing/SKILL.md
+  s_446424daedca15::t_9dfd7947f9d47a 1-13
+agent_skills/approval-workflow/SKILL.md
+  s_446424daedca15::t_5b6a7414762f5e 1-14
+agent_skills/sql-analysis/SKILL.md
+  s_446424daedca15::t_44acce01b5cdff 1-25
+customer_agent.py
+  s_446424daedca15::t_c8d25b4765a43a 11,16,26-29,63-83,90-93,95,100,115-116,125,184-243,295,325-326,328-337,339-340,343-361,375-377,380-388,392,396-425,429-482,511-512,516-520,522-529,536-539,550-556,559-560
+customer_analytics.py
+  s_446424daedca15::t_7f0163a0e8309b 1-187
+customer_auth.py
+  s_446424daedca15::t_bcea5cdd530a16 7,135,144-145,148,151-242,271,273-274,283-323,363,367-381
+customer_services.py
+  s_446424daedca15::t_3b875164b37638 1-74
+customer_skills.py
+  s_446424daedca15::t_6e993f72fc3dde 1-164
+customer_store.py
+  s_446424daedca15::t_291a9abb9853e8 12-15,21,68-70,89-90,94-96,100-121,138-141,143-148,192,285
+customer_subagents.py
+  s_446424daedca15::t_9753a4ef0b13bb 1-103
+customer_tracing.py
+  s_446424daedca15::t_f74f3c86faa7ff 1-113
+index.html
+  s_446424daedca15::t_e519acccbf98f9 17,26-31,97,99-100,173-174,178-194,197,240,299-305
+requirements.txt
+  s_446424daedca15::t_e0da1bec7f6c1f 1-6
+run_customer_samples.py
+  s_446424daedca15::t_bd42e186473e25 16,26-29,106-109
+run_mixed_trace_batch.py
+  s_446424daedca15::t_e9bf8e4c96d2ef 1-421
+run_subagent_samples.py
+  s_446424daedca15::t_868255aa2d7da2 1-298
+run_tool_trace_batch.py
+  s_446424daedca15::t_f0d662a47178ed 1-197
+server.py
+  s_446424daedca15::t_4995d02be4dd5f 40-41,87,95-101,103-209,246,248-251,272,275-279,362-363,390-391
+test_chat_stream.cjs
+  s_446424daedca15::t_f716c481aa6c43 17,245-349
+test_customer_analytics.py
+  s_446424daedca15::t_ea0426165dd636 1-301
+test_customer_operations.py
+  s_446424daedca15::t_ba5eb2ba02f5a5 12-14,26,29-33,35-42,44
+test_customer_rejection_tags.py
+  s_446424daedca15::t_aae2dc1ce57b98 1-259
+test_customer_services.py
+  s_446424daedca15::t_24086f29075e4c 1-106
+test_customer_skills.py
+  s_446424daedca15::t_2822929161ae41 1-246
+test_customer_subagents.py
+  s_446424daedca15::t_4ee71eecf9f212 1-234
+test_mixed_trace_batch.py
+  s_446424daedca15::t_2d7b199ff5db39 1-86
+test_ui_scenarios.py
+  s_446424daedca15::t_3c062c321a8984 1-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "91479a61c59a27c48d437e97299c61e589582d79",
+  "prompts": {},
+  "humans": {
+    "h_a86a5c27becfe4": {
+      "author": "Joel Johnson <joel.johnson@langchain.dev>"
+    }
+  },
+  "sessions": {
+    "s_446424daedca15": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d9dc-625e-7860-9421-e9a89cf5ec51",
+        "model": "unknown"
+      },
+      "human_author": "Joel Johnson <joel.johnson@langchain.dev>"
+    }
+  }
+}
