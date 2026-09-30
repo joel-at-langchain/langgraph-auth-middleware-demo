@@ -56,7 +56,7 @@ hover for the policy being tested and expected result. Try:
 
 The parent is a custom LangGraph integrating Deep Agents middleware—not the full
 `create_deep_agent` stack. Permissions intersect across user, parent, and child;
-delegation never grants extra access. See [DEMO_GUIDE.md](DEMO_GUIDE.md) for the
+delegation never grants extra access. See the [demo guide](docs/demo-guide.md) for the
 scenario catalog, policy details, and trace hierarchy.
 
 ## Populate a tracing project
@@ -122,18 +122,33 @@ tool rejections. Verification checks the stored trace, not just the final answer
 ## Development
 
 ```sh
-LANGSMITH_TRACING=false LANGCHAIN_TRACING_V2=false python -m unittest discover -p 'test_*.py'
-node --test test_chat_stream.cjs
+LANGSMITH_TRACING=false LANGCHAIN_TRACING_V2=false python -m unittest discover -s tests -t . -p 'test_*.py'
+node --test tests/ui/test_chat_stream.cjs
 ```
 
-`server.py` + `index.html` serve the UI; `customer_agent.py` orchestrates the graph;
-`customer_auth.py` / `customer_store.py` enforce and seed policy;
-`customer_subagents.py`, `customer_analytics.py`, `customer_services.py`, and
-`customer_skills.py` implement the governed capabilities. `approval_inbox.py`
-handles reviews and `customer_tracing.py` records outcome tags.
-`generate_traces.py` is the public CLI; `run_governance_trace_batch.py` owns batch
-planning/execution/verification. Older `run_*samples.py` and focused batch runners
-remain available for specialized experiments.
+```text
+demo/                Runtime: agent, authorization, stores, services, approvals
+  playbooks/         Three bundled runtime skills (SKILL.md)
+scripts/             Trace-batch engine and focused live sample runners
+tests/               Offline Python regressions; UI tests in tests/ui/
+web/                 Chat and approvals UI
+docs/demo-guide.md   Scenarios, policy details, and trace interpretation
+examples/legacy/     Earlier generic-agent and evaluator experiments
+server.py            Stable server launcher
+generate_traces.py   Stable trace-generation CLI
+```
+
+`demo/paths.py` resolves configuration, UI, and playbooks from the repository,
+not the working directory. The `.env` stays at the repository root. Default trace
+artifacts go to `trace_batches/`; explicit `--output` paths are relative to your
+working directory. `local/scratch/` preserves personal experiments. Both folders
+are git-ignored and excluded from the demo and test discovery.
+
+For focused samples, run `python -m scripts.samples --help` from the repo root.
+The legacy examples are retained for reference, not used by the running demo;
+some legacy runners register evaluators or automatically review fictional writes.
+Use `generate_traces.py` for the current demo. Superseded implementation plans
+have been removed; their history remains in Git.
 
 ## Demo boundaries
 

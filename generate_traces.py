@@ -1,6 +1,6 @@
 """Public CLI for reproducible demo trace batches; run with --help for options."""
 
-from run_governance_trace_batch import main
+from scripts.trace_batch import main
 
 
 if __name__ == "__main__":
