@@ -6,7 +6,7 @@ failure conditions. Each scenario is designed to produce exactly one
 score=0 on its target evaluator.
 
 Run:
-    python -m examples.legacy.run_incident_scenarios
+    uv run --no-sync python -m examples.legacy.run_incident_scenarios
 
 Scenarios
 ---------

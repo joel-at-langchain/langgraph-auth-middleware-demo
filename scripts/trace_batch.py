@@ -24,8 +24,10 @@ from demo.store import TENANTS
 from scripts.samples import events_for
 from scripts.subagent_samples import cases as native_cases
 from scripts.tool_samples import FAILURE_EVENTS, cases as service_cases
+from scripts.trace_verification import review_filter, verify_review
+from scripts.policy_samples import cases as policy_cases, verify_policy_evidence
 
-SUITES = {"mixed": None, "tools": "service", "subagents": "native-subagent", "sql": "sql"}
+SUITES = {"mixed": None, "tools": "service", "subagents": "native-subagent", "sql": "sql", "governance": "governance"}
 
 
 def validate_base_url(value):
@@ -42,12 +44,12 @@ def validate_base_url(value):
 def plan_batch(count=20, suite="mixed", include_hitl=False):
     """Offline, deterministic case selection; no configuration or network access."""
     if not 1 <= count <= 500 or suite not in SUITES:
-        raise ValueError("Count must be 1–500 and suite must be mixed/tools/subagents/sql")
+        raise ValueError("Count must be 1–500 and suite must be mixed/tools/subagents/sql/governance")
     if include_hitl and (suite != "mixed" or count < 9):
         raise ValueError("HITL requires --suite mixed and --count at least 9")
     approvals = approval_cases()[:min(10, max(3, count // 10))] if include_hitl else []
     groups = {}
-    for case in ordinary_cases():
+    for case in policy_cases() if suite == "governance" else ordinary_cases():
         if SUITES[suite] is None or case["group"] == SUITES[suite]:
             groups.setdefault(case["group"], deque()).append(case)
     # Round-robin groups so a small mixed batch still reaches every capability.
@@ -380,6 +382,10 @@ def verify_batch(path):
         assert metadata["sample_batch_id"] == batch["batch_id"]
         assert metadata["conversation_id"] == metadata["thread_id"] == case["conversation_id"]
         spans = list(descendants(root))
+        verify_policy_evidence(root, spans)
+        if "expected_security_signals" in case:
+            assert metadata.get("policy_id"), "Restart the demo to load the governance policy before this suite"
+            assert sorted(t for t in root.tags if t.startswith("security-signal:")) == sorted(case["expected_security_signals"]), case["case_id"]
         rejected = [r for r in spans if r.run_type == "tool" and "tool-rejected" in r.tags]
         categories = {r.extra["metadata"]["rejection_category"] for r in rejected}
         assert categories == set(actual["categories"]), case["case_id"]
@@ -394,6 +400,9 @@ def verify_batch(path):
             assert ("tool-failed" in tool.tags) == (category == "execution")
         if actual["request_denied"]:
             assert not any(r.run_type in {"tool", "llm"} for r in spans)
+            if metadata.get("trace_schema_version") == "10":
+                assert metadata["request_outcome"] == "denied"
+                assert "request-outcome:denied" in root.tags
         if case.get("subagent_type") and any(r.name.startswith("tools.task.") for r in spans):
             owner = next(r for r in spans if r.name == "tools.task." + case["subagent_type"])
             assert ("subagent-rejected" in owner.tags) == bool(rejected)
@@ -412,6 +421,7 @@ def verify_batch(path):
                 assert result["version"] == pauses[case["approval_id"]]["expected_version"] + 1
         return {"case_id": case["case_id"], "stage": case["stage"], "group": case["group"], "run_id": str(root.id),
                 "conversation_id": case["conversation_id"], "tags": root.tags, "categories": sorted(categories),
+                "policy_version": metadata.get("policy_version"), "security_signals": metadata.get("security_signals", []),
                 "request_denied": actual["request_denied"], "expected_outcome_passed": actual["passed"],
                 "rejected_tools": [{"name": r.name, "tags": r.tags} for r in rejected]}
 
@@ -420,8 +430,7 @@ def verify_batch(path):
         for future in as_completed([pool.submit(verify, case) for case in started]):
             verified.append(future.result())
             print(f"Verified agent roots: {len(verified)}/{len(started)}", flush=True)
-    query = ('and(eq(name,"authorization.authorize_transaction"),eq(metadata_key,"auth_phase"),'
-             f'eq(metadata_value,"inbox_decision"),lt(start_time,{json.dumps(summary["finished_at"])}))')
+    query = review_filter(summary["finished_at"])
     reviews = []
     for attempt in range(4) if pauses else ():
         with warnings.catch_warnings():
@@ -435,8 +444,7 @@ def verify_batch(path):
     assert len(reviews) == summary["review_roots"] and len({r.inputs["approval_id"] for r in reviews}) == len(reviews)
     for root in reviews:
         case = pauses[root.inputs["approval_id"]]
-        assert root.end_time and root.outputs["decision"] == "allow"
-        assert root.inputs["actor"]["user_id"] == f"user:{case['tenant_id']}/lead"
+        verify_review(root, case, batch["batch_id"])
         verified.append({"case_id": case["case_id"], "stage": "review", "group": case["group"], "run_id": str(root.id),
                          "conversation_id": case["conversation_id"], "tags": root.tags, "categories": [], "expected_outcome_passed": True})
     assert len(verified) == len({r["run_id"] for r in verified}) == expected_roots

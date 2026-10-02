@@ -13,9 +13,9 @@ Strategies
 
 Run
 ---
-    pip install -r requirements.txt
+    sfw uv sync --locked
     # fill in .env with real keys
-    python -m examples.legacy.langgraph_auth_middleware
+    uv run --no-sync python -m examples.legacy.langgraph_auth_middleware
 """
 
 import asyncio

@@ -55,6 +55,8 @@ class CustomerStore:
     """Reset by constructing a fresh store. All IDs are tenant-qualified."""
 
     def __init__(self):
+        from demo.policy import active_policy
+        self.policy = active_policy()  # Validate the immutable bundle at startup.
         self.fga = FGAStore()
         self.tenants = {}
         self.users = {}

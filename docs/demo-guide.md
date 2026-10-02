@@ -127,7 +127,7 @@ and agent permissions.
 Generate exactly 50 new traces through `/api/run` and `/api/stream`, using the real
 model and standard main-agent routing:
 
-`python -m scripts.tool_samples --output trace_batches/my-new-batch.jsonl`
+`uv run --no-sync python -m scripts.tool_samples --output trace_batches/my-new-batch.jsonl`
 
 The matrix repeats each tool's success and failure case five times, rotating
 tenants: 25 successes, 15 simulated service failures, and 10 authorization denials.
@@ -138,7 +138,7 @@ created JSONL manifest. A model refusal without invoking the tool fails verifica
 
 Verify existing traces, without generating any more:
 
-`python -m scripts.tool_samples --verify-only trace_batches/my-new-batch.jsonl`
+`uv run --no-sync python -m scripts.tool_samples --verify-only trace_batches/my-new-batch.jsonl`
 
 The verifier reads those 50 IDs from LangSmith and checks persisted root/tool tags,
 categories, and counts, writing a separate `.verified.json` report. Filter by the
@@ -292,8 +292,8 @@ Start with [README.md](../README.md) for portable setup and the supported
 `generate_traces.py` command. For example:
 
 ```sh
-python generate_traces.py --count 100 --include-hitl --dry-run
-python generate_traces.py --count 100 --include-hitl --verify
+uv run --no-sync python generate_traces.py --count 100 --include-hitl --dry-run
+uv run --no-sync python generate_traces.py --count 100 --include-hitl --verify
 ```
 
 This uses the normal model-routed `/api/run` entry point. HITL decisions require
@@ -309,7 +309,7 @@ With tracing enabled, runs appear in the configured `LANGSMITH_PROJECT`
 as **customer_operations.turn**, tagged
 **customer-operations**, **tenant-governance**, and **tool** or **handoff**.
 The specialist graph is named **renewal_analyst.assess_account**.
-New runs carry `trace_schema_version=9`; older traces are
+New runs carry `trace_schema_version=10`; older traces are
 unchanged. Update saved run-name filters if they target the old root name.
 
 ### Trace naming and authorization middleware
@@ -417,7 +417,8 @@ The rejected tool span carries `tool_name`, `call_id`, `reason_code`, and
 `rejected_tools`, `rejection_categories`, and a `tool_rejections` summary (first
 100 calls; `rejection_details_truncated` indicates additional calls). Summaries
 exclude SQL, arguments, record contents, and exception text. Repeated events for
-one tool span count once. Existing `fga-deny` tags remain on authorization spans.
+one tool span count once. Existing `fga-deny` tags remain on authorization spans,
+but now describe only the final decision (see the schema below).
 
 Tags are recorded from actual execution events, not model prose. A root tag means
 the turn **contained** an unsuccessful tool call, not that the final response failed.
@@ -430,8 +431,121 @@ inside the traced tool coroutine so invalid arguments receive outcome tags too.
 No historical runs are backfilled. These tags persist with normal trace completion;
 they do not require a separate LangSmith update request.
 
-Try `sql-adoption` (successful, untagged) and `sql-billing-denied` (tagged as
+Try `sql-adoption` (successful, no rejection tags) and `sql-billing-denied` (tagged as
 authorization rejection) using the live sample runner below.
+
+### Versioned policy evidence and security signals
+
+The runtime loads [policy 1.0.0](../policies/demo-governance.md) with a validated
+[manifest](../policies/demo-governance.json). Policy identity is server-owned, not
+an agent argument. `policy_id`, `policy_version`, `policy_bundle_sha256`, and
+`policy_evaluator_version` propagate to the request, authorization transactions,
+native and tool-wrapped specialists, tools, approval reviews, and resumed roots.
+These are additive metadata fields; the trace schema remains v10.
+
+The bundle is immutable for the life of the process. Edit the document and manifest
+together, bump the policy version, run tests, and restart. Approval proposal hashes
+include the policy identity, and a different bundle makes a pending approval stale.
+Current FGA relationships are still checked at each use, including resume: policy
+version does not represent a frozen grant snapshot or a cached authorization.
+
+`governance.evaluate_signals` spans project deterministic findings from final
+authorization decisions. The root's `security_signals` metadata contains control
+ID, observation mode, threshold/count, resource key where relevant, and bounded
+supporting action/call/run references. Signal tags appear on the triggering source,
+owning tool/subagent, and root; they do not label unrelated siblings or overwrite
+`auth-decision`, `tool-outcome`, or `subagent-outcome`.
+Annotations are applied immediately before the owning span is finalized so later
+SDK children cannot inherit an earlier finding from active parent metadata.
+
+- `security-signal:repeated-authorization-denials` (`MON-001`): three distinct
+  denied actions in one turn.
+- `security-signal:multiple-denied-paths` (`MON-002`): at least two denied paths
+  to the same canonical target account/resource. A path includes operation,
+  specialist, and executing agent lineage. It does not imply the failed grants
+  were identical or that access was successfully bypassed.
+- `security-signal:cross-tenant-attempt` (`MON-003`): a denied requested target is
+  positively identified as foreign from trusted fixtures. Unknown resources do
+  not qualify. The user and model still receive the same generic denial.
+
+The window is one execution: request, review, and resume each have their own state.
+Application-generated action IDs deduplicate internal checks independently of
+model call IDs. Filtered discovery, validation errors, service outages, and human
+review choices do not inflate authorization-denial counts. Monitoring neither
+adds automatic blocking nor depends on LangSmith delivery.
+
+Interpret `policy_evaluation_status` before interpreting an empty signal list:
+
+- `completed`: the observed execution finished; no finding is not proof of compliance.
+- `interrupted`: the execution paused for human review; resume is a new window.
+- `error`: the execution failed before normal completion.
+- `incomplete` (or missing): observation failed, exceeded its action limit, or is unknown.
+
+`policy_evaluated_action_count` and `policy_denied_action_count` count logical
+actions with final authorization evidence, not raw FGA checks or all model outputs.
+`policy_actions_truncated`, per-finding `evidence_truncated`, and
+`policy_trace_projection_failed` disclose evidence limitations. These are telemetry
+coverage indicators, not an independent measurement of enforcement coverage.
+
+The focused suite includes repeated billing denials, direct/native alternative
+paths, cross-tenant preflight, successful reads, service failure, and SQL validation:
+
+```sh
+uv run --no-sync python generate_traces.py --suite governance --count 6 --dry-run
+uv run --no-sync python generate_traces.py --suite governance --count 6 --verify --strict
+```
+
+It uses `/api/run`, like the other suites. A model can decline the requested probes;
+verification requires the expected stored signals and never synthesizes them.
+The default mixed matrix is unchanged. Offline deterministic equivalents run with
+`python -m unittest -v tests.test_governance_policy` in the synced uv environment.
+
+The mock standard documents enforced versus monitored controls, coverage tests,
+and production limitations. Durable delivery, integrity, retention, access controls,
+and reconciliation would be necessary before treating this trace view as an
+authoritative governance audit ledger.
+
+### Canonical trace schema (v10)
+
+Tags are low-cardinality filters; identities, correlation IDs, and reason codes
+are metadata. Each outcome dimension has at most one current value on a span:
+
+| Scope | Canonical tags | Matching metadata |
+| --- | --- | --- |
+| Authorization transaction / tenant verification | `auth-decision:allow`, `auth-decision:deny` | `auth_decision`, `auth_reason_code` |
+| Request gate and turn root | `request-outcome:allowed`, `request-outcome:denied` | `request_outcome`, `request_reason_code` |
+| Tool | `tool-outcome:completed`, `denied`, `rejected`, `error`, `waiting`, `held` (same prefix) | `tool_outcome`, canonical `tool_name` |
+| Native subagent / owning task | `subagent-outcome:completed`, `denied`, `rejected`, `error`, `waiting` (same prefix) | `subagent_outcome`, `subagent_type` |
+| Human review root | `review-outcome:accepted`, `denied`, `stale`, `rejected` (same prefix) | `review_outcome`, accepted `approval_decision` |
+| Approval-bearing tool, native subagent and root | `approval-outcome:pending`, `approved`, `denied`, `held` (same prefix) | `approval_outcome`, `approval_id` |
+
+Authorization inputs, completion events, and metadata identify the actor actually
+being authorized, even when a child rechecks parent permissions. Individual FGA
+checks remain events; they cannot add a competing final decision tag. Legacy
+`fga-allow` / `fga-deny` are aliases for the final decision. An allowed discovery
+transaction can still have individual denied checks for filtered-out skills.
+
+Request outcome describes the admission check, **not** final answer success.
+Tool denial means authorization refused; rejection means validation or human
+review refused; error means execution failed. Native subagent outcomes describe
+their own execution: an honest completed report can contain a handled rejection.
+Legacy `tool-rejected`, `subagent-rejected`, and `subagent-failed` remain aggregate
+compatibility filters, not the canonical terminal outcome. Counts still refer to
+the failing leaf only. `task` is the canonical tool name; the selected specialist
+is `subagent_type`, independent of the span's display name.
+
+HITL retains three independent roots: request, `approvals.review`, and resume.
+Review contains `authorization.authorize_transaction` rather than adding a fourth
+root. All three share `thread_id`, `conversation_id`, `request_run_id`, schema
+version and sample labels. `interaction_phase` and `phase:request|review|resume`
+identify the stage; approval-bearing roots also carry `approval_id`.
+`review-outcome:accepted` means an authorized, current human decision was accepted;
+`approval_decision` is `approve`, `deny`, or `conditional`. Neither an approved
+decision nor allowed authorization proves the resumed write succeeded. Inspect
+the resumed tool result for that. Unauthorized or stale review attempts carry no
+accepted decision. Review inputs/metadata exclude brief contents and comments.
+Polling does not create traces. Verifiers also support schema-9 review roots;
+historical runs are never backfilled.
 
 ### Streaming responses
 
@@ -451,36 +565,36 @@ responses continue to stream normally.
 
 Offline verification:
 
-`LANGSMITH_TRACING=false LANGCHAIN_TRACING_V2=false python -m unittest discover -s tests -t . -p 'test_*.py'`
+`LANGSMITH_TRACING=false LANGCHAIN_TRACING_V2=false uv run --no-sync python -m unittest discover -s tests -t . -p 'test_*.py'`
 
 Frontend streaming, replay, and inbox tests: `node --test tests/ui/test_chat_stream.cjs`.
 
 Live samples through the same HTTP/main-agent path as the UI:
 
-`python -m scripts.samples`
+`uv run --no-sync python -m scripts.samples`
 
 To reproduce the no-tool authorization cases:
 
-`python -m scripts.samples --case wrong-tenant-name --case greeting`
+`uv run --no-sync python -m scripts.samples --case wrong-tenant-name --case greeting`
 
 The runner reports event counts and first/last text timing, and requires text
 deltas for model-driven samples.
 
 Native skill discovery and on-demand reading through the main agent:
 
-`python -m scripts.samples --case skill-loading`
+`uv run --no-sync python -m scripts.samples --case skill-loading`
 
 SQL samples through the same HTTP/main-agent path (no database changes):
 
-`python -m scripts.samples --case sql-adoption --case sql-incidents --case sql-billing-denied --case sql-delegation-denied`
+`uv run --no-sync python -m scripts.samples --case sql-adoption --case sql-incidents --case sql-billing-denied --case sql-delegation-denied`
 
 The live workflow sample also approves a fictional brief in Beacon Data:
 
-`python -m scripts.samples --case workflow --include-write`
+`uv run --no-sync python -m scripts.samples --case workflow --include-write`
 
-Server startup in your activated virtual environment:
+Server startup after syncing with `sfw uv sync --locked`:
 
-`python server.py`
+`uv run --no-sync python server.py`
 
 The served implementation is in `demo/store.py`, `demo/auth.py`,
 `demo/agent.py`, `demo/approvals.py`, and `demo/server.py` (launched by `server.py`).
@@ -535,8 +649,8 @@ Generate 20 real main-entrypoint examples (8 successes, 6 delegation denials,
 3 mock child service failures, 3 HITL outcomes):
 
 ```sh
-python -m scripts.subagent_samples --output trace_batches/native-example.jsonl
-python -m scripts.subagent_samples --verify-only trace_batches/native-example.jsonl
+uv run --no-sync python -m scripts.subagent_samples --output trace_batches/native-example.jsonl
+uv run --no-sync python -m scripts.subagent_samples --verify-only trace_batches/native-example.jsonl
 ```
 
 For an explicit follow-up subset, supply repeated case numbers, for example
@@ -546,8 +660,8 @@ actual persisted tags and whether the intended scenario outcome passed.
 
 The runner approves one fictional brief, denies one and holds one. It reuses a
 single session, never retries POSTs, and records accepted run IDs immediately.
-Twenty examples produce 26 root traces:20 requests,3 review-authorizations and
-3 resumes. Initial/resumed runs share conversation IDs and batch labels. The
+Twenty examples produce 26 root traces: 20 requests, 3 human reviews and
+3 resumes. All stages share conversation IDs and batch labels. The
 read-only verification report also records the three review roots by exact
 proposal ID. Use a new output path for each batch; existing artifacts are never
-overwritten. Offline tests: `python -m unittest -q tests.test_customer_subagents`.
+overwritten. Offline tests: `uv run --no-sync python -m unittest -q tests.test_customer_subagents`.

@@ -10,6 +10,8 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field
 
+from demo.tracing import tag_subagent_outcome
+
 
 SUBAGENTS = {
     "billing-review": {
@@ -55,7 +57,24 @@ class GovernedChildMiddleware(AgentMiddleware):
 
     async def abefore_model(self, state, runtime):
         config = get_config()
-        checked_scope(self.store, config, self.emit(self.actor(config), config, "task"))
+        try:
+            checked_scope(self.store, config, self.emit(self.actor(config), config, "task"))
+        except Exception as exc:
+            from demo.store import AccessDenied
+            # AccessDenied is a policy result; unexpected middleware errors are errors.
+            tag_subagent_outcome(config, "denied" if isinstance(exc, AccessDenied) else "error")
+            raise
+
+    async def awrap_model_call(self, request, handler):
+        try:
+            return await handler(request)
+        except Exception:
+            tag_subagent_outcome(get_config(), "error")
+            raise
+
+    async def aafter_agent(self, state, runtime):
+        # A handled tool error can still yield a completed, honest child report.
+        tag_subagent_outcome(get_config(), "completed")
 
 def build_subagent_middleware(store, model, by_name, emitter, actor_from_config, named_config):
     policy = GovernedChildMiddleware(store, emitter, actor_from_config)

@@ -1,7 +1,7 @@
 """Run live samples through the same HTTP/main-agent boundary as the chat UI.
 
-Usage: python -m scripts.samples [--base-url http://127.0.0.1:8000]
-       python -m scripts.samples --case workflow --include-write
+Usage: uv run --no-sync python -m scripts.samples [--base-url http://127.0.0.1:8000]
+       uv run --no-sync python -m scripts.samples --case workflow --include-write
 """
 
 import argparse

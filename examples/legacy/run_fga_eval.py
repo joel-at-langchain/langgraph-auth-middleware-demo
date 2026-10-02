@@ -11,7 +11,7 @@ evaluators registered in Phase 1.
 
 Run
 ---
-    python -m examples.legacy.run_fga_eval
+    uv run --no-sync python -m examples.legacy.run_fga_eval
 """
 
 import asyncio

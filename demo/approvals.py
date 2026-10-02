@@ -8,15 +8,18 @@ import asyncio
 import time
 import uuid
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 import langsmith as ls
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langgraph.types import Command
 from starlette.exceptions import HTTPException
 
 from demo.store import AccessDenied
+from demo.tracing import TRACE_SCHEMA_VERSION, tag_review
+from demo.policy import policy_execution, policy_metadata
 
 
 def now():
@@ -112,24 +115,82 @@ class ApprovalInbox:
                 "pending_count": len(pending), "reviewer_id": actor.user_id,
                 "truncated": len(visible) > 100}
 
-    def authorized_item(self, actor, approval_id):
+    def authorized_item(self, actor, approval_id, *, config=None, emit=None):
         item = self.items.get(approval_id)
         if item is None or not self.active_owner(item) or item.proposal["tenant_id"] != actor.tenant_id:
             raise HTTPException(404, "Approval is unavailable")
         try:
-            self.store.authorization.authorize_review(actor, item.proposal, phase="inbox_decision")
+            self.store.authorization.authorize_review(actor, item.proposal, phase="inbox_decision", config=config, emit=emit)
         except AccessDenied:
             # Do not reveal whether a guessed/foreign/now-revoked item exists.
             raise HTTPException(404, "Approval is unavailable") from None
         return item
 
-    def claim(self, item, actor, decision, comment):
+    def review(self, actor, approval_id, decision, comment):
+        """One correlated review root; start resumption only after this span ends."""
+        from demo.agent import emitter
+
+        item = self.items.get(approval_id)
+        if item is None or not self.active_owner(item) or item.proposal["tenant_id"] != actor.tenant_id:
+            raise HTTPException(404, "Approval is unavailable")
+        original = self.runtime.runs.get(item.request_run_id)
+        labels = dict(original.sample_labels) if original else {}
+        tags = ["customer-operations", "tenant-governance", "phase:review"]
+        if labels:
+            tags.append("tool-outcome-batch")
+            if labels.get("sample_batch_id"):
+                tags.append("batch:" + labels["sample_batch_id"])
+        trace_config = {"run_name": "approvals.review", "callbacks": self.runtime.trace_callbacks,
+                        "tags": tags, "metadata": {**labels, **asdict(actor),
+                            "trace_schema_version": TRACE_SCHEMA_VERSION, "interaction_phase": "review",
+                            "thread_id": item.conversation_id, "conversation_id": item.conversation_id,
+                            "approval_id": item.id, "request_run_id": item.request_run_id,
+                            "reviewer_id": actor.user_id},
+                        "configurable": {"thread_id": item.conversation_id,
+                                         **asdict(actor), "governance_action_id": uuid.uuid4().hex,
+                                         "call_id": item.proposal["call_id"], "invocation_mode": "review"}}
+
+        def decide(_request, config: RunnableConfig):
+            try:
+                self.authorized_item(actor, approval_id, config=config,
+                                     emit=emitter(actor, config, "review_account_brief"))
+                if decision not in {"approve", "deny", "conditional"}:
+                    raise HTTPException(400, "Invalid review decision")
+                self._claim(item, actor, decision, comment)
+            except HTTPException as exc:
+                outcome = "denied" if exc.status_code == 404 else "stale" if item.status == "stale" else "rejected"
+                tag_review(config, outcome)
+                return {"status_code": exc.status_code, "detail": exc.detail, "review_outcome": outcome}
+            tag_review(config, "accepted", decision)
+            return {"decision": "allow", "review_outcome": "accepted", "approval_decision": decision}
+
+        with policy_execution(trace_config) as (prepared, _state):
+            result = RunnableLambda(decide, name="approvals.review").invoke(
+                {"actor": asdict(actor), "approval_id": item.id}, config=prepared,
+            )
+        if "status_code" in result:
+            raise HTTPException(result["status_code"], result["detail"])
+        # No awaits separate authorization, version binding and claim. This runs
+        # outside the review Runnable context: resumed turns remain separate roots.
+        conversation = self.runtime.conversations[item.conversation_id]
+        run = self.runtime.start(conversation, Command(resume={
+            "approval_id": item.id, "reviewer": actor.user_id, "decision": decision, "comment": comment,
+        }), reviewing=item)
+        item.resolution_run_id = run.id
+        return item, run
+
+    def _claim(self, item, actor, decision, comment):
         """No awaits between validation and claim: one winner per pending item."""
         conversation = self.runtime.conversations[item.conversation_id]
         pending = conversation.pending
         if (item.status != "pending" or conversation.busy or not pending
                 or pending["approval_id"] != item.id or conversation.pending_run_id != item.request_run_id):
             raise HTTPException(409, "This approval is no longer pending")
+        if any(item.proposal.get(key) != value for key, value in policy_metadata().items()):
+            item.status, item.outcome, item.resolved_at = "stale", "policy_changed", now()
+            conversation.pending = None
+            conversation.failed = True
+            raise HTTPException(409, "The policy changed. Ask the agent for a new proposal.")
         if self.store.briefs[item.proposal["account_id"]]["version"] != item.proposal["expected_version"]:
             item.status, item.outcome, item.resolved_at = "stale", "brief_version_changed", now()
             conversation.pending = None
@@ -137,11 +198,6 @@ class ApprovalInbox:
             raise HTTPException(409, "The brief changed. Ask the agent for a new proposal.")
         item.status, item.reviewer_id, item.decision, item.comment = "resuming", actor.user_id, decision, comment
         conversation.pending = None
-        run = self.runtime.start(conversation, Command(resume={
-            "approval_id": item.id, "reviewer": actor.user_id, "decision": decision, "comment": comment,
-        }), reviewing=item)
-        item.resolution_run_id = run.id
-        return run
 
     def observe_resolution(self, item, event):
         if item is None or item.status != "resuming" or event["data"].get("call_id") != item.proposal["call_id"]:

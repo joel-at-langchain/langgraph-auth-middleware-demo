@@ -22,6 +22,7 @@ import httpx
 from demo.store import TENANTS
 from scripts.samples import events_for
 from scripts.tool_samples import FAILURE_EVENTS, cases, check_events
+from scripts.trace_verification import review_filter, verify_review
 
 
 def now():
@@ -297,15 +298,13 @@ def verify_batch(path):
     if not summaries or summaries[-1]["service_passed"] != 70 or summaries[-1]["workflow_passed"] != 10:
         raise ValueError("Batch did not complete")
     client = Client()
-    # Review roots have no batch labels. Exact proposal IDs bind them to these requests.
-    review_filter = ('and(eq(name, "authorization.authorize_transaction"),'
-                     'eq(metadata_key, "auth_phase"),eq(metadata_value, "inbox_decision"),'
-                     f'lt(start_time, {json.dumps(summaries[-1]["finished_at"])}))')
+    # Include historical authorization-only reviews; bind by exact proposal IDs.
+    query = review_filter(summaries[-1]["finished_at"])
     decisions = []
     for attempt in range(4):
         decisions = [r for r in client.list_runs(
             project_name=utils.get_tracer_project(), is_root=True,
-            start_time=datetime.fromisoformat(batch["started_at"]), filter=review_filter, limit=100,
+            start_time=datetime.fromisoformat(batch["started_at"]), filter=query, limit=100,
         ) if (r.inputs or {}).get("approval_id") in pauses]
         if len(decisions) == 10:
             break
@@ -374,8 +373,7 @@ def verify_batch(path):
             print(f"Verified agent traces: {len(verified)}/90", flush=True)
     for root in decisions:
         case = pauses[root.inputs["approval_id"]]
-        assert root.end_time and root.outputs["decision"] == "allow"
-        assert root.inputs["actor"]["user_id"] == case["reviewer"]
+        verify_review(root, case, batch["batch_id"])
         assert "contains-tool-rejection" not in root.tags
         verified.append({"case_id": case["case_id"], "stage": "review_authorization", "run_id": str(root.id),
                          "approval_id": root.inputs["approval_id"], "conversation_id": case["conversation_id"],

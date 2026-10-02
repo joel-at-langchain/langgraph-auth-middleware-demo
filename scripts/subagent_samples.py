@@ -21,6 +21,7 @@ import httpx
 from demo.store import TENANTS
 from scripts.samples import events_for
 from scripts.tool_samples import FAILURE_EVENTS
+from scripts.trace_verification import review_filter, verify_review
 
 
 def cases():
@@ -245,8 +246,7 @@ def verify_batch(path):
             verified.append(future.result())
             print(f"Verified agent roots: {len(verified)}/{len(started)}", flush=True)
     finished = rows[-1]["finished_at"]
-    query = ('and(eq(name,"authorization.authorize_transaction"),eq(metadata_key,"auth_phase"),'
-             f'eq(metadata_value,"inbox_decision"),lt(start_time,{json.dumps(finished)}))')
+    query = review_filter(finished)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         reviews = [r for r in client.list_runs(project_name=utils.get_tracer_project(), is_root=True,
@@ -255,7 +255,7 @@ def verify_batch(path):
     assert len(reviews) == len(pauses) and len({r.inputs["approval_id"] for r in reviews}) == len(pauses)
     for root in reviews:
         case = pauses[root.inputs["approval_id"]]
-        assert root.end_time and root.outputs["decision"] == "allow"
+        verify_review(root, case, batch["batch_id"])
         verified.append({"case_id": case["case_id"], "stage": "review_authorization", "run_id": str(root.id),
                          "conversation_id": case["conversation_id"], "root_tags": root.tags, "category": None})
     assert len({r["run_id"] for r in verified}) == len(started) + len(pauses)

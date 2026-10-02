@@ -1,0 +1,23 @@
+[project]
+name = "langgraph-auth-middleware-demo"
+version = "0.1.0"
+description = "Multi-tenant customer operations demo with FGA governance and LangSmith tracing"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "deepagents==0.7.20",
+    "httpx>=0.28,<1",
+    "langchain>=1.4.3,<1.5",
+    "langchain-anthropic>=1.7.5,<2",
+    "langchain-core>=1.6.6,<2",
+    "langgraph>=1.2.11,<1.3",
+    "langsmith>=0.14.1,<1",
+    "pydantic>=2.12,<3",
+    "python-dotenv>=1.0,<2",
+    "starlette>=1.0,<2",
+    "uvicorn>=0.30,<1",
+]
+
+[tool.uv]
+# This is a repository-run application, not an installable distribution.
+package = false

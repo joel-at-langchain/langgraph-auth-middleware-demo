@@ -8,8 +8,8 @@ and a scenario runner that exercises all four auth paths.
 
 Run
 ---
-    pip install -r requirements.txt
-    python -m examples.legacy.langgraph_fga_governance
+    sfw uv sync --locked
+    uv run --no-sync python -m examples.legacy.langgraph_fga_governance
 """
 
 import asyncio

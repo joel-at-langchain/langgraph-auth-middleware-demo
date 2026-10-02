@@ -24,9 +24,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from demo.store import AccessDenied, Actor, CustomerStore, REFERENCE_DATE, StaleApproval
 from demo.analytics import QueryRejected
-from demo.tracing import tag_tool_rejection
+from demo.tracing import tag_tool_rejection, tag_request, tag_execution_event, mark_subagent, tag_subagent_outcome
 from demo.services import SERVICE_TOOLS, MockServiceFailure
 from demo.subagents import SUBAGENTS, TaskRequest, build_subagent_middleware, invoke_native_task
+from demo.policy import observe_authorization, policy_metadata, policy_scope, prepare_policy_execution
 
 RESPOND_NODE = "customer_operations.respond"
 TOOLS_NODE = "customer_operations.execute_tools"
@@ -118,16 +119,17 @@ def emitter(actor: Actor, config: RunnableConfig, tool_name: str):
         if run is not None:
             run.add_metadata({key: data[key] for key in ("tenant_id", "user_id", "agent_id", "call_id", "invocation_mode")})
             run.add_event({"name": name, "time": data["time"], "kwargs": data})
-            if name in {"fga_decision", "authorization_completed", "tenant_verification_completed"}:
-                run.add_tags(["fga-" + fields["decision"]])
             if name.startswith("agent_call_"):
-                run.add_tags(["agent-to-agent", name.replace("_", "-")])
+                run.add_tags([tag for tag in ("agent-to-agent", name.replace("_", "-")) if tag not in (run.tags or [])])
         tag_tool_rejection(config, run, name, data)
+        tag_execution_event(config, run, name, data)
         try:
-            get_stream_writer()({"event": name, "data": data})
-        except RuntimeError:
-            # The same operations can also be called from a non-streaming graph.
+            writer = get_stream_writer()
+        except (RuntimeError, KeyError):
+            # Authorization also runs in standalone review Runnables.
             pass
+        else:
+            writer({"event": name, "data": data})
     return emit
 
 
@@ -258,6 +260,7 @@ def reviewed_write(store, actor, name, args, config, emit):
         "content": args.get("content", brief["content"]),
         "tenant_id": actor.tenant_id, "user_id": actor.user_id, "agent_id": actor.agent_id,
         "conversation_id": ledger_key[0], "call_id": ledger_key[1],
+        **policy_metadata(),
     }
     approval_id = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     proposal = {**payload, "approval_id": approval_id, "reviewers": store.reviewers(actor, account["id"])}
@@ -299,6 +302,8 @@ def build_customer_graph(store: CustomerStore, model):
         context = config["configurable"]
         gate_config = {**config, "configurable": {
             **context, "call_id": context["turn_id"] + "-request",
+            "governance_action_id": uuid.uuid4().hex,
+            "governance_operation": "authorize_request",
         }}
         emit = emitter(actor, gate_config, "authorize_request")
         if context.get("invocation_mode", "tool") == "handoff":
@@ -314,8 +319,10 @@ def build_customer_graph(store: CustomerStore, model):
             )
         try:
             store.authorization.authorize_request(actor, references, emit=emit, config=gate_config)
+            tag_request(gate_config, "allowed")
             return {"request_allowed": True}
         except AccessDenied as exc:
+            tag_request(gate_config, "denied", exc.code)
             emit("request_denied", resource=", ".join(references) or f"tenant:{actor.tenant_id}", reason_code=exc.code)
             return {"request_allowed": False, "messages": [AIMessage(content=str(exc))]}
 
@@ -377,6 +384,9 @@ def build_customer_graph(store: CustomerStore, model):
             emit("tool_completed", resource=resource, status=result.get("status", "completed"))
             return result
         except AccessDenied as exc:
+            observe_authorization(store, actor, {"operation": name, "resource": resource,
+                                  "record_id": args.get("record_id"), "phase": "invoke"},
+                                  {"decision": "deny", "reason_code": exc.code}, config, scope="tool")
             emit("agent_call_denied" if name in {"assess_renewal_readiness", "analyze_customer_data"} else "tool_denied",
                  resource=resource, reason_code=exc.code)
             exc.governed_rejection_recorded = True
@@ -393,9 +403,11 @@ def build_customer_graph(store: CustomerStore, model):
             # StructuredTool injects its own child callbacks separately from
             # RunnableConfig. Forward these so auth/specialist spans nest under
             # this tool, not alongside it under the tool-execution graph node.
-            tool_config = {**config, "callbacks": callbacks}
+            tool_config = {**config, "callbacks": callbacks, "configurable": {
+                **config["configurable"], "governance_action_id": uuid.uuid4().hex,
+                "governance_operation": name}}
             if isinstance(runtime, ToolRuntime):
-                tool_config["configurable"] = {**config["configurable"], "call_id": runtime.tool_call_id}
+                tool_config["configurable"]["call_id"] = runtime.tool_call_id
             emit = emitter(actor_from_config(config), tool_config, name)
             try:
                 if runtime is not None and not isinstance(runtime, ToolRuntime):
@@ -405,19 +417,24 @@ def build_customer_graph(store: CustomerStore, model):
                 args = schema.model_validate(kwargs).model_dump()
                 return await execute(name, args, tool_config)
             except GraphInterrupt:
+                tag_subagent_outcome(tool_config, "waiting")
                 raise  # Waiting for human review is not a failure.
             except (AccessDenied, QueryRejected) as exc:
+                tag_subagent_outcome(tool_config, "denied" if isinstance(exc, AccessDenied) else "rejected")
                 exc.governed_rejection_recorded = True
                 raise  # The execution boundary already emitted this rejection.
             except StaleApproval as exc:
+                tag_subagent_outcome(tool_config, "rejected")
                 emit("tool_rejected", reason_code="stale_approval", rejection_category="approval")
                 exc.governed_rejection_recorded = True
                 raise
             except ValueError as exc:
+                tag_subagent_outcome(tool_config, "rejected")
                 emit("tool_rejected", reason_code="invalid_request", rejection_category="input-validation")
                 exc.governed_rejection_recorded = True
                 raise
             except Exception as exc:
+                tag_subagent_outcome(tool_config, "error")
                 emit("tool_failed", reason_code=exc.code if isinstance(exc, MockServiceFailure) else "execution_error",
                      rejection_category="execution", mock_service=isinstance(exc, MockServiceFailure))
                 exc.governed_rejection_recorded = True
@@ -429,9 +446,14 @@ def build_customer_graph(store: CustomerStore, model):
     subagents = build_subagent_middleware(store, model, by_name, emitter, actor_from_config, named_config)
 
     async def task(config: RunnableConfig, callbacks=None, **kwargs):
-        task_config = {**config, "callbacks": callbacks}
+        task_config = {**config, "callbacks": callbacks, "configurable": {
+            **config["configurable"], "governance_action_id": uuid.uuid4().hex,
+            "governance_operation": "task"}}
         actor = actor_from_config(task_config)
         emit = emitter(actor, task_config, "task")
+        requested_kind = kwargs.get("subagent_type")
+        references = []
+        mark_subagent(task_config, requested_kind if isinstance(requested_kind, str) and requested_kind in SUBAGENTS else "unknown")
         try:
             args = TaskRequest.model_validate(kwargs).model_dump()
             kind = args["subagent_type"]
@@ -452,26 +474,36 @@ def build_customer_graph(store: CustomerStore, model):
                             "metadata": {**task_config.get("metadata", {}), "subagent_type": kind,
                                          "child_agent_id": scope["child_agent_id"], "middleware": "deepagents.SubAgentMiddleware"}}
             result = await invoke_native_task(subagents, args, child_config)
+            tag_subagent_outcome(task_config, "completed")
             emit("agent_call_completed", child_agent_id=scope["child_agent_id"], resource=scope["account_id"], subagent_type=kind)
             return result
         except GraphInterrupt:
+            tag_subagent_outcome(task_config, "waiting")
             raise
         except AccessDenied as exc:
+            tag_subagent_outcome(task_config, "denied")
             if not getattr(exc, "governed_rejection_recorded", False):
+                observe_authorization(store, actor, {"operation": "task", "references": references,
+                                      "subagent_type": requested_kind, "phase": "delegate"},
+                                      {"decision": "deny", "reason_code": exc.code}, task_config, scope="subagent")
                 emit("agent_call_denied", reason_code=exc.code)
             raise
         except MockServiceFailure:
+            tag_subagent_outcome(task_config, "error")
             emit("agent_call_failed", reason_code="child_tool_failed")
             raise
         except StaleApproval as exc:
+            tag_subagent_outcome(task_config, "rejected")
             if not getattr(exc, "governed_rejection_recorded", False):
                 emit("tool_rejected", reason_code="stale_approval", rejection_category="approval")
             raise
         except ValueError as exc:
+            tag_subagent_outcome(task_config, "rejected")
             if not getattr(exc, "governed_rejection_recorded", False):
                 emit("tool_rejected", reason_code="invalid_subagent_request", rejection_category="input-validation")
             raise
         except Exception as exc:
+            tag_subagent_outcome(task_config, "error")
             if not getattr(exc, "governed_rejection_recorded", False):
                 emit("tool_failed", reason_code="subagent_execution_error", rejection_category="execution")
             raise
@@ -490,6 +522,7 @@ def build_customer_graph(store: CustomerStore, model):
             store.authorization.verify_tenant(actor, emit=emitter(actor, config, "generate_response"),
                                               config=named_config(config, "authorization.verify_tenant"))
         except AccessDenied as exc:
+            tag_request(config, "denied", exc.code)
             return {"messages": [AIMessage(content=str(exc))]}
         visible = store.visible_accounts(actor)
         system = SystemMessage(content=(
@@ -526,6 +559,7 @@ def build_customer_graph(store: CustomerStore, model):
                 subagents=subagents,
             )
         except AccessDenied as exc:
+            tag_request(config, "denied", exc.code)
             return {"messages": [AIMessage(content=str(exc))]}
         return {"messages": [response]}
 
@@ -644,6 +678,22 @@ def response_text(content):
 
 async def stream_turn(graph, input_data, config):
     """Public parent-graph boundary shared by web, tests, and trace samples."""
+    prepared, state = prepare_policy_execution(config)
+    stream = _stream_turn(graph, input_data, prepared)
+    end = object()
+    try:
+        while True:
+            with policy_scope(state):
+                event = await anext(stream, end)
+            if event is end:
+                break
+            yield event
+    finally:
+        with policy_scope(state):
+            await stream.aclose()
+
+
+async def _stream_turn(graph, input_data, config):
     active_message_id = None
     async for namespace, mode, chunk in graph.astream(
         input_data, config=config, stream_mode=["updates", "custom", "messages"], subgraphs=True

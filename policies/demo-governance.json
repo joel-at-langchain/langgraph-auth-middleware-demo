@@ -1,0 +1,11 @@
+{
+  "policy_id": "customer-operations-governance",
+  "policy_version": "1.0.0",
+  "evaluator_version": "1",
+  "scope": "agent-turn",
+  "rules": [
+    {"control_id": "MON-001", "tag": "security-signal:repeated-authorization-denials", "threshold": 3, "mode": "observe"},
+    {"control_id": "MON-002", "tag": "security-signal:multiple-denied-paths", "threshold": 2, "mode": "observe"},
+    {"control_id": "MON-003", "tag": "security-signal:cross-tenant-attempt", "threshold": 1, "mode": "observe"}
+  ]
+}

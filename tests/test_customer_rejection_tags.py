@@ -40,7 +40,8 @@ class RecordingTracer(LangChainTracer):
     def _update_run_single(self, run):
         self.completed[run.id] = {"name": run.name, "parent_run_id": run.parent_run_id,
                                   "tags": list(run.tags or []), "metadata": deepcopy(run.extra.get("metadata", {})),
-                                  "error": run.error}
+                                  "error": run.error, "inputs": deepcopy(run.inputs),
+                                  "outputs": deepcopy(run.outputs), "events": deepcopy(run.events)}
 
 
 class RejectionTagTests(unittest.IsolatedAsyncioTestCase):

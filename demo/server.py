@@ -22,6 +22,7 @@ from starlette.routing import Route
 from demo.agent import build_customer_graph, create_live_model, stream_turn
 from demo.store import AccessDenied, Actor, CustomerStore
 from demo.approvals import ApprovalInbox
+from demo.tracing import TRACE_SCHEMA_VERSION
 
 COOKIE = "customer_demo_session"
 load_dotenv(REPO_ROOT / ".env")
@@ -209,8 +210,9 @@ def suggested_tasks(store, actor, accounts):
 
 
 class DemoRuntime:
-    def __init__(self, store, model):
+    def __init__(self, store, model, callbacks=None):
         self.store = store
+        self.trace_callbacks = list(callbacks or [])
         self.graph = build_customer_graph(store, model)
         self.sessions = {}
         self.conversations = {}
@@ -263,12 +265,17 @@ class DemoRuntime:
             "demo_action": conversation.demo_action,
         }
         config = {
+            "callbacks": self.trace_callbacks,
             "configurable": context, "recursion_limit": 20, "run_id": uuid.UUID(run.id),
             "run_name": "customer_operations.turn",
-            "tags": ["customer-operations", "tenant-governance", conversation.mode],
+            "tags": ["customer-operations", "tenant-governance", conversation.mode,
+                     "phase:resume" if reviewing else "phase:request"],
             "metadata": {"tenant_id": conversation.actor.tenant_id, "user_id": conversation.actor.user_id,
                          "agent_id": conversation.actor.agent_id, "conversation_id": conversation.id,
-                         "trace_schema_version": "9", "approval_demo": conversation.demo_key is not None,
+                         "trace_schema_version": TRACE_SCHEMA_VERSION, "approval_demo": conversation.demo_key is not None,
+                         "interaction_phase": "resume" if reviewing else "request",
+                         "request_run_id": reviewing.request_run_id if reviewing else run.id,
+                         "approval_id": reviewing.id if reviewing else None,
                          "reviewed_approval_id": reviewing.id if reviewing else None},
         }
         if run.sample_labels:
@@ -314,8 +321,8 @@ async def body_as(request, schema):
         raise HTTPException(400, "Invalid request fields") from None
 
 
-def create_app(model=None, store=None):
-    runtime = DemoRuntime(store or CustomerStore(), model if model is not None else create_live_model())
+def create_app(model=None, store=None, callbacks=None):
+    runtime = DemoRuntime(store or CustomerStore(), model if model is not None else create_live_model(), callbacks=callbacks)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -426,10 +433,14 @@ def create_app(model=None, store=None):
             raise HTTPException(409, "This review is no longer pending")
         try:
             reviewer = runtime.store.actor(conversation.actor.tenant_id, data.reviewer)
-            item = runtime.inbox.authorized_item(reviewer, data.approval_id)
-        except (AccessDenied, HTTPException):
+        except AccessDenied:
             raise HTTPException(403, "Reviewer is not authorized")
-        run = runtime.inbox.claim(item, reviewer, data.decision, data.comment)
+        try:
+            _, run = runtime.inbox.review(reviewer, data.approval_id, data.decision, data.comment)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise HTTPException(403, "Reviewer is not authorized") from None
+            raise
         return JSONResponse({"conversation_id": conversation.id, "run_id": run.id})
 
     async def approvals(request):
@@ -452,8 +463,7 @@ def create_app(model=None, store=None):
         data = await body_as(request, InboxDecision)
         runtime.session(request)
         actor = runtime.store.actor(data.tenant_id, data.user_id)
-        item = runtime.inbox.authorized_item(actor, request.path_params["aid"])
-        runtime.inbox.claim(item, actor, data.decision, data.comment)
+        item, _ = runtime.inbox.review(actor, request.path_params["aid"], data.decision, data.comment)
         # Reviewers receive a proposal status, never the requester's raw stream.
         return JSONResponse({"approval": runtime.inbox.serialize(item)}, status_code=202,
                             headers={"Cache-Control": "no-store"})

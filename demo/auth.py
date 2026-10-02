@@ -9,6 +9,22 @@ import re
 
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 
+from demo.tracing import tag_authorization
+from demo.policy import observe_authorization, policy_config
+
+
+def actor_emitter(emit, actor):
+    """Rebind nested checks without retaining the outer caller's identity."""
+    if emit is None:
+        return None
+    original = getattr(emit, "unbound_emitter", emit)
+
+    def scoped(name, **fields):
+        original(name, **{**fields, **asdict(actor)})
+
+    scoped.unbound_emitter = original
+    return scoped
+
 
 class CustomerAuthorizationMiddleware:
     def __init__(self, store):
@@ -42,6 +58,7 @@ class CustomerAuthorizationMiddleware:
 
     @staticmethod
     def _trace_config(config, actor, name, **metadata):
+        config = policy_config(config)
         child = {
             **(config or {}), "run_name": name,
             "tags": [*(config or {}).get("tags", []), "authorization-middleware"],
@@ -52,8 +69,9 @@ class CustomerAuthorizationMiddleware:
 
     def verify_tenant(self, actor, *, emit=None, config=None):
         from demo.store import AccessDenied
+        emit = actor_emitter(emit, actor)
 
-        def verify(_request):
+        def verify(_request, config: RunnableConfig):
             tenant = f"tenant:{actor.tenant_id}"
             if emit:
                 emit("tenant_verification_started", resource=tenant)
@@ -78,18 +96,19 @@ class CustomerAuthorizationMiddleware:
                      decision=result["decision"], reason_code=result["reason_code"])
                 emit("tenant_verification_completed", resource=tenant,
                      decision=result["decision"], reason_code=result["reason_code"])
+            tag_authorization(config, asdict(actor), result)
             return result
 
         result = RunnableLambda(verify, name="authorization.verify_tenant").invoke(
             {"actor": asdict(actor)},
-            config=self._trace_config(config, actor, "authorization.verify_tenant"),
+            config=self._trace_config(config, actor, "authorization.verify_tenant", policy_control_ids=["AUTH-001"]),
         )
         if result["decision"] != "allow":
             raise AccessDenied(result["reason_code"])
         return result
 
     def authorize_request(self, actor, references, *, emit=None, config=None):
-        def evaluate(_config):
+        def evaluate(_config, emit):
             # Visibility preflight only; actual tool permissions remain mandatory.
             for reference in references:
                 self.store.account(actor, reference, "reader", "get_customer_account", emit)
@@ -103,7 +122,7 @@ class CustomerAuthorizationMiddleware:
         """Reading a proposal and deciding it require the same reviewer scope."""
         from demo.store import AccessDenied
 
-        def evaluate(_config):
+        def evaluate(_config, emit):
             if proposal.get("tenant_id") != actor.tenant_id or proposal.get("operation") not in {
                 "save_account_brief", "archive_account_brief",
             }:
@@ -145,14 +164,14 @@ class CustomerAuthorizationMiddleware:
             request["datasets"] = datasets
 
         return self._transaction(actor, request,
-                                 lambda _config: self._evaluate(actor, operation, reference, record_id, reviewer, phase, emit, datasets),
+                                 lambda _config, emit: self._evaluate(actor, operation, reference, record_id, reviewer, phase, emit, datasets),
                                  emit, config, scope="tool")
 
     def authorize_subagent(self, parent, subagent_type, reference, *, emit=None, config=None):
         from demo.store import AccessDenied
         from demo.subagents import SUBAGENTS
 
-        def evaluate(child_config):
+        def evaluate(child_config, emit):
             if subagent_type not in SUBAGENTS or parent.parent_agent_id:
                 raise AccessDenied("subagent_not_allowed")
             child_id = f"agent:{parent.tenant_id}/{subagent_type}"
@@ -171,7 +190,7 @@ class CustomerAuthorizationMiddleware:
             account = self.store.account(parent, reference, "reader", "task", emit)
             child = replace(parent, agent_id=child_id, parent_agent_id=parent.agent_id)
             self.verify_tenant(child, emit=emit, config=child_config)
-            self.store.check(child, account["id"], "reader", "get_customer_account", emit)
+            self.store.check(child, account["id"], "reader", "get_customer_account", actor_emitter(emit, child))
             return {"account_id": account["id"], "child_agent_id": child_id}
 
         return self._transaction(parent, {"actor": asdict(parent), "operation": "task",
@@ -204,7 +223,7 @@ class CustomerAuthorizationMiddleware:
         from demo.skills import SKILLS
         from demo.store import AccessDenied
 
-        def evaluate(_config):
+        def evaluate(_config, emit):
             visible = []
             for key in SKILLS:
                 resource = f"skill:{actor.tenant_id}/{key}"
@@ -226,7 +245,7 @@ class CustomerAuthorizationMiddleware:
         key = SKILL_FILES.get(file_path)
         resource = f"skill:{actor.tenant_id}/{key}" if key else file_path
 
-        def evaluate(_config):
+        def evaluate(_config, emit):
             if key is None or operation not in {"load_agent_skills", "read_file"}:
                 raise AccessDenied()
             # Revoking the loader grant also blocks reads of previously known
@@ -246,23 +265,30 @@ class CustomerAuthorizationMiddleware:
 
         resource = request.get("resource") or ", ".join(request.get("references", [])) or f"tenant:{actor.tenant_id}"
         phase = request["phase"]
+        emit = actor_emitter(emit, actor)
 
         def authorize_transaction(_request, config: RunnableConfig):
             if emit:
                 emit("authorization_started", resource=resource, phase=phase, auth_scope=scope)
             try:
                 self.verify_tenant(actor, emit=emit, config=config)
-                result = {"decision": "allow", "reason_code": "granted", **evaluate(config)}
+                result = {"decision": "allow", "reason_code": "granted", **evaluate(config, emit)}
             except AccessDenied as exc:
                 result = {"decision": "deny", "reason_code": exc.code}
             if emit:
                 emit("authorization_completed", resource=resource, phase=phase, auth_scope=scope,
                      decision=result["decision"], reason_code=result["reason_code"])
+            tag_authorization(config, asdict(actor), result)
+            observe_authorization(self.store, actor, request, result, config, scope=scope)
             return result
 
         result = RunnableLambda(authorize_transaction, name="authorization.authorize_transaction").invoke(
             request, config=self._trace_config(config, actor, "authorization.authorize_transaction",
-                                              auth_operation=request["operation"], auth_phase=phase, auth_scope=scope),
+                                              auth_operation=request["operation"], auth_phase=phase, auth_scope=scope,
+                                              policy_control_ids=["AUTH-001", "AUTH-002"] +
+                                              (["AUTH-003"] if scope == "subagent" or actor.parent_agent_id or
+                                               request["operation"] in {"assess_renewal_readiness", "analyze_customer_data"} else []) +
+                                              (["HITL-001"] if scope == "approval" or phase == "resume" else [])),
         )
         if result["decision"] != "allow":
             raise AccessDenied(result["reason_code"])

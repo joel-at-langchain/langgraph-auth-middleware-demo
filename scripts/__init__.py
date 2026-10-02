@@ -1,1 +1,1 @@
-"""Trace generation and live samples; invoke individual modules with python -m."""
+"""Trace generation and live samples; invoke individual modules with uv run --no-sync python -m."""
